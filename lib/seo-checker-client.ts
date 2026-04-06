@@ -27,10 +27,11 @@ function buildApiErrorMessage(input: {
   const stage = payload.stage ? `stage=${payload.stage}` : "";
   const requestId = payload.requestId ? `request=${payload.requestId}` : "";
   const debugParts = [stage, requestId].filter(Boolean).join(" ");
+  const debug = isDev && debugParts ? ` [${debugParts}]` : "";
   const detail = isDev && payload.detail ? ` ${payload.detail}` : "";
   const base = payload.error || `${fallback} (${status})`;
 
-  return `${base}${debugParts ? ` [${debugParts}]` : ""}${detail}`.trim();
+  return `${base}${debug}${detail}`.trim();
 }
 
 export async function analyzeSeoDocument(file: File): Promise<SeoAnalysisResult> {

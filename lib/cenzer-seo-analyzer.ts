@@ -1130,6 +1130,25 @@ export async function analyzeWithCenzerModel(
   });
 
   const prompt = buildPrompt(diagnostics, prepared);
+
+  console.info("[Cenzer SEO][Model] Prompt assembled", {
+    stage: "model-request",
+    requestId: context.requestId,
+    promptCharacters: prompt.length,
+    documentChars: diagnostics.documentText.length,
+    excerptChars: prepared.excerpt.length,
+    keyBodySections: prepared.keyBodySections.length,
+    previewBlocks: prepared.previewBlocks.length,
+  });
+
+  if (prompt.length > 80_000) {
+    console.warn("[Cenzer SEO][Model] Prompt is unusually large", {
+      stage: "model-request",
+      requestId: context.requestId,
+      promptCharacters: prompt.length,
+    });
+  }
+
   const outputText = await requestAnthropicText({
     prompt,
     mode: "analysis",

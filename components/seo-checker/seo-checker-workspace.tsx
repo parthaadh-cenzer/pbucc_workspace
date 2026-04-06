@@ -296,13 +296,7 @@ export function SeoCheckerWorkspace() {
       setReviewDecisions(nextDecisions);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      const isDev = process.env.NODE_ENV !== "production";
-
-      if (isDev && message) {
-        setUploadError(`Analyze failed: ${message}`);
-      } else {
-        setUploadError("Unable to analyze this document. Please try another .docx file.");
-      }
+      setUploadError(message || "Unable to analyze this document. Please try another .docx file.");
     } finally {
       setIsAnalyzing(false);
     }
