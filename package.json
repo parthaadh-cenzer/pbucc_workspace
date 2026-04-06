@@ -4,10 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run prisma:verify-postgres && prisma generate && npm run prisma:migrate:deploy:if-vercel && next build",
+    "build:vercel": "npm run prisma:verify-postgres && prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "eslint",
+    "prisma:verify-postgres": "node scripts/verify-prisma-postgres.cjs",
     "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy:if-vercel": "node scripts/prisma-migrate-if-vercel.cjs",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
   },
