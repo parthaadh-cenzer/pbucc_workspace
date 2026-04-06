@@ -31,6 +31,42 @@ type ModelAnalysisPayload = {
   suggestions?: unknown;
 };
 
+type ModelRequestContext = {
+  requestId: string;
+};
+
+type PreparedModelContext = {
+  title: string;
+  intro: string;
+  headings: string[];
+  ctaSentence: string | null;
+  keyBodySections: string[];
+  excerpt: string;
+  previewBlocks: Array<{
+    id: string;
+    index: number;
+    type: SeoPreviewBlock["kind"];
+    content: string;
+    listLevel?: number;
+    listOrder?: number;
+  }>;
+  wasReduced: boolean;
+  originalChars: number;
+  analyzedChars: number;
+  droppedParagraphEstimate: number;
+};
+
+const MAX_PROMPT_DOC_CHARS = 16_000;
+const MAX_TITLE_CHARS = 180;
+const MAX_INTRO_CHARS = 900;
+const MAX_HEADING_CHARS = 140;
+const MAX_HEADINGS = 20;
+const MAX_CTA_CHARS = 260;
+const MAX_KEY_BODY_SECTIONS = 14;
+const MAX_BODY_SECTION_CHARS = 620;
+const MAX_PREVIEW_BLOCK_COUNT = 70;
+const MAX_PREVIEW_BLOCK_TEXT_CHARS = 320;
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -157,16 +193,65 @@ function stripCodeFences(raw: string) {
     .trim();
 }
 
-function extractJsonCandidate(raw: string) {
-  const withoutFences = stripCodeFences(raw);
-  const start = withoutFences.indexOf("{");
-  const end = withoutFences.lastIndexOf("}");
+function extractFirstBalancedJsonObject(raw: string) {
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escapeNext = false;
 
-  if (start < 0 || end <= start) {
-    throw new Error("[model-json-extract] Could not locate a complete JSON object in model response.");
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (inString && char === "\\") {
+      escapeNext = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) {
+        start = index;
+      }
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      if (depth > 0) {
+        depth -= 1;
+      }
+
+      if (depth === 0 && start >= 0) {
+        return raw.slice(start, index + 1).trim();
+      }
+    }
   }
 
-  return withoutFences.slice(start, end + 1).trim();
+  return null;
+}
+
+function extractJsonCandidate(raw: string) {
+  const withoutFences = stripCodeFences(raw);
+  const balanced = extractFirstBalancedJsonObject(withoutFences);
+
+  if (!balanced) {
+    throw new Error("[stage=model-json-parse] Could not locate a complete JSON object in model response.");
+  }
+
+  return balanced;
 }
 
 function sanitizeJsonCandidate(candidate: string) {
@@ -174,6 +259,9 @@ function sanitizeJsonCandidate(candidate: string) {
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/\u00A0/g, " ")
+    .replace(/\u0000/g, "")
+    .replace(/\/\/.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/,\s*([}\]])/g, "$1")
     .trim();
 }
@@ -183,7 +271,7 @@ function tryParseJson(stage: string, candidate: string) {
     return JSON.parse(candidate) as ModelAnalysisPayload;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown JSON parse error.";
-    throw new Error(`[${stage}] ${message}`);
+    throw new Error(`[stage=model-json-parse] ${stage}: ${message}`);
   }
 }
 
@@ -194,8 +282,9 @@ function getDevLogSnippet(value: string, maxLength = 500) {
 async function requestAnthropicText(input: {
   prompt: string;
   mode: "analysis" | "repair";
+  context: ModelRequestContext;
 }) {
-  const { prompt, mode } = input;
+  const { prompt, mode, context } = input;
   let runtimeConfig;
 
   try {
@@ -203,27 +292,34 @@ async function requestAnthropicText(input: {
   } catch (error) {
     const configuredModel = process.env.ANTHROPIC_MODEL?.trim() || "(default)";
     console.error("[Cenzer SEO][Model] Anthropic runtime configuration invalid", {
+      stage: "model-request",
+      requestId: context.requestId,
       mode,
       hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
       model: configuredModel,
       error: error instanceof Error ? error.message : "unknown",
     });
-    throw error;
+    throw new Error("[stage=model-request] Anthropic runtime configuration is invalid.");
   }
 
   const { apiKey, model } = runtimeConfig;
 
   console.info("[Cenzer SEO][Model] Request configuration", {
+    stage: "model-request",
+    requestId: context.requestId,
     mode,
     model,
     hasApiKey: true,
     keyLength: apiKey.length,
+    promptChars: prompt.length,
   });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
 
   console.info("[Cenzer SEO][Model] Anthropic request started", {
+    stage: "model-request",
+    requestId: context.requestId,
     mode,
     model,
   });
@@ -253,16 +349,20 @@ async function requestAnthropicText(input: {
     });
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error(`[anthropic-timeout] Anthropic ${mode} request timed out after 45 seconds.`);
+      throw new Error(
+        `[stage=model-request-timeout] Anthropic ${mode} request timed out after 45 seconds.`,
+      );
     }
 
     const message = error instanceof Error ? error.message : "unknown network error";
-    throw new Error(`[anthropic-network] Anthropic ${mode} request failed: ${message}`);
+    throw new Error(`[stage=model-request] Anthropic ${mode} request failed: ${message}`);
   } finally {
     clearTimeout(timeout);
   }
 
   console.info("[Cenzer SEO][Model] Anthropic response received", {
+    stage: "model-response",
+    requestId: context.requestId,
     mode,
     model,
     status: response.status,
@@ -275,6 +375,8 @@ async function requestAnthropicText(input: {
 
     if (response.status === 401 || response.status === 403) {
       console.error("[Cenzer SEO][Model] Anthropic authorization failure", {
+        stage: "model-response",
+        requestId: context.requestId,
         mode,
         model,
         status: response.status,
@@ -286,7 +388,7 @@ async function requestAnthropicText(input: {
     }
 
     throw new Error(
-      `[anthropic-http-${response.status}] Provider ${mode} request failed (${response.status}): ${failureText.slice(0, 300)}`,
+      `[stage=model-response] Provider ${mode} request failed (${response.status}): ${failureText.slice(0, 300)}`,
     );
   }
 
@@ -296,16 +398,26 @@ async function requestAnthropicText(input: {
     data = (await response.json()) as AnthropicResponse;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown json parse error";
-    throw new Error(`[anthropic-response-json] Failed to parse provider JSON response: ${message}`);
+    throw new Error(`[stage=model-response] Failed to parse provider JSON response: ${message}`);
   }
 
   const textBlock = data.content?.find((block) => block.type === "text");
 
+  console.info("[Cenzer SEO][Model] Anthropic response content check", {
+    stage: "model-response",
+    requestId: context.requestId,
+    mode,
+    hasTextContent: Boolean(textBlock?.text),
+    contentBlocks: Array.isArray(data.content) ? data.content.length : 0,
+  });
+
   if (!textBlock?.text) {
-    throw new Error("[anthropic-response-content] Provider response did not contain text output.");
+    throw new Error("[stage=model-response] Provider response did not contain text output.");
   }
 
   console.info("[Cenzer SEO][Model] Anthropic text payload ready", {
+    stage: "model-response",
+    requestId: context.requestId,
     mode,
     characters: textBlock.text.length,
   });
@@ -484,7 +596,256 @@ function normalizeSuggestions(value: unknown, diagnostics: DocumentDiagnostics):
   });
 }
 
-function buildPrompt(input: DocumentDiagnostics) {
+function normalizeWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateText(value: string, maxChars: number) {
+  const normalized = normalizeWhitespace(value);
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trim()}...`;
+}
+
+function paragraphFingerprint(value: string) {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .slice(0, 180);
+}
+
+function selectKeyBodySections(diagnostics: DocumentDiagnostics) {
+  const unique: Array<{ text: string; index: number }> = [];
+  const seen = new Set<string>();
+
+  diagnostics.paragraphs.forEach((paragraph, index) => {
+    const text = normalizeWhitespace(paragraph);
+    if (text.length < 40) {
+      return;
+    }
+
+    const fingerprint = paragraphFingerprint(text);
+    if (!fingerprint || seen.has(fingerprint)) {
+      return;
+    }
+
+    seen.add(fingerprint);
+    unique.push({ text, index });
+  });
+
+  if (unique.length <= MAX_KEY_BODY_SECTIONS) {
+    return unique.map((entry) => truncateText(entry.text, MAX_BODY_SECTION_CHARS));
+  }
+
+  const keywordSet = new Set(diagnostics.topKeywords.map((keyword) => keyword.term.toLowerCase()));
+  const scored = unique.map((entry) => {
+    const lower = entry.text.toLowerCase();
+    let keywordHits = 0;
+
+    keywordSet.forEach((keyword) => {
+      if (keyword && lower.includes(keyword)) {
+        keywordHits += 1;
+      }
+    });
+
+    const lengthScore = entry.text.length >= 80 && entry.text.length <= 450 ? 1 : 0;
+    return {
+      ...entry,
+      score: keywordHits * 3 + lengthScore,
+    };
+  });
+
+  const picked = new Map<number, { text: string; index: number; score: number }>();
+  const first = scored[0];
+  const middle = scored[Math.floor(scored.length / 2)];
+  const last = scored[scored.length - 1];
+
+  [first, middle, last].forEach((entry) => {
+    if (entry) {
+      picked.set(entry.index, entry);
+    }
+  });
+
+  for (const entry of [...scored].sort((a, b) => b.score - a.score)) {
+    if (picked.size >= MAX_KEY_BODY_SECTIONS) {
+      break;
+    }
+    picked.set(entry.index, entry);
+  }
+
+  return [...picked.values()]
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => truncateText(entry.text, MAX_BODY_SECTION_CHARS));
+}
+
+function prepareModelContext(diagnostics: DocumentDiagnostics): PreparedModelContext {
+  const title = truncateText(diagnostics.title, MAX_TITLE_CHARS);
+  const intro = truncateText(diagnostics.intro, MAX_INTRO_CHARS);
+  const headings = diagnostics.headings.slice(0, MAX_HEADINGS).map((heading) => truncateText(heading, MAX_HEADING_CHARS));
+  const ctaSentence = diagnostics.ctaSentence ? truncateText(diagnostics.ctaSentence, MAX_CTA_CHARS) : null;
+  const keyBodySections = selectKeyBodySections(diagnostics);
+
+  const contextParts = [
+    `Title: ${title}`,
+    headings.length > 0 ? `Headings:\n- ${headings.join("\n- ")}` : "Headings: none detected",
+    `Intro: ${intro}`,
+    ctaSentence ? `CTA: ${ctaSentence}` : "CTA: not explicitly detected",
+    keyBodySections.length > 0
+      ? `Key body sections:\n- ${keyBodySections.join("\n- ")}`
+      : "Key body sections: none extracted",
+  ];
+
+  const combinedContext = contextParts.join("\n\n");
+  const excerpt = truncateText(combinedContext, MAX_PROMPT_DOC_CHARS);
+
+  const previewBlocks = diagnostics.previewBlocks.slice(0, MAX_PREVIEW_BLOCK_COUNT).map((block) => ({
+    id: block.id,
+    index: block.index,
+    type: block.kind,
+    content: truncateText(block.text, MAX_PREVIEW_BLOCK_TEXT_CHARS),
+    listLevel: block.listLevel,
+    listOrder: block.listOrder,
+  }));
+
+  return {
+    title,
+    intro,
+    headings,
+    ctaSentence,
+    keyBodySections,
+    excerpt,
+    previewBlocks,
+    wasReduced:
+      diagnostics.documentText.length > MAX_PROMPT_DOC_CHARS ||
+      diagnostics.previewBlocks.length > MAX_PREVIEW_BLOCK_COUNT ||
+      diagnostics.headings.length > MAX_HEADINGS ||
+      diagnostics.paragraphs.length > keyBodySections.length,
+    originalChars: diagnostics.documentText.length,
+    analyzedChars: excerpt.length,
+    droppedParagraphEstimate: Math.max(0, diagnostics.paragraphs.length - keyBodySections.length),
+  };
+}
+
+function buildHeuristicFallbackSuggestions(diagnostics: DocumentDiagnostics): SeoSuggestion[] {
+  const titleIndex = diagnostics.previewBlocks.find((block) => block.kind === "title")?.index ?? 0;
+  const introIndex = diagnostics.previewBlocks.find((block) => block.kind === "paragraph")?.index ?? 1;
+  const headingIndex = diagnostics.previewBlocks.find((block) => block.kind === "heading")?.index ?? introIndex;
+
+  const primaryKeyword = diagnostics.topKeywords[0]?.term;
+  const suggestions: SeoSuggestion[] = [];
+
+  suggestions.push({
+    id: "fallback-title-keyword",
+    title: "Strengthen title keyword focus",
+    reason: "Clear keyword alignment in the title improves search relevance signals.",
+    currentText: diagnostics.title,
+    suggestedText: primaryKeyword
+      ? `${diagnostics.title} | ${primaryKeyword}`
+      : `${diagnostics.title} | Practical Guide`,
+    targetType: "title",
+    targetIndex: titleIndex,
+    originalTextSnippet: diagnostics.title,
+    suggestedReplacementText: primaryKeyword
+      ? `${diagnostics.title} | ${primaryKeyword}`
+      : `${diagnostics.title} | Practical Guide`,
+    impact: "High",
+    projectedGain: 8,
+    category: "Title",
+  });
+
+  suggestions.push({
+    id: "fallback-intro-intent",
+    title: "Clarify search intent in intro",
+    reason: "The intro should state audience problem and expected outcome in plain language.",
+    currentText: diagnostics.intro,
+    suggestedText: `${truncateText(diagnostics.intro, 180)} Add one sentence that names audience intent and expected result.`,
+    targetType: "paragraph",
+    targetIndex: introIndex,
+    originalTextSnippet: truncateText(diagnostics.intro, 120),
+    suggestedReplacementText: `${truncateText(diagnostics.intro, 180)} Add one sentence that names audience intent and expected result.`,
+    impact: "Medium",
+    projectedGain: 5,
+    category: "Intent",
+  });
+
+  suggestions.push({
+    id: "fallback-heading-structure",
+    title: "Improve heading scannability",
+    reason: "Stronger headings improve structure and make key terms easier to crawl.",
+    currentText: diagnostics.headings[0] ?? "",
+    suggestedText: diagnostics.headings[0]
+      ? `${diagnostics.headings[0]}: Key Benefits`
+      : "Add descriptive H2 headings that mirror user search questions.",
+    targetType: "heading",
+    targetIndex: headingIndex,
+    originalTextSnippet: diagnostics.headings[0] ?? "",
+    suggestedReplacementText: diagnostics.headings[0]
+      ? `${diagnostics.headings[0]}: Key Benefits`
+      : "Add descriptive H2 headings that mirror user search questions.",
+    impact: "Medium",
+    projectedGain: 5,
+    category: "Headings",
+  });
+
+  suggestions.push({
+    id: "fallback-cta-clarity",
+    title: "Make CTA explicit and action-oriented",
+    reason: "Documents with a direct CTA improve conversion clarity.",
+    currentText: diagnostics.ctaSentence ?? "No clear CTA sentence found.",
+    suggestedText: diagnostics.ctaSentence
+      ? `${diagnostics.ctaSentence} Include one measurable next step and a timeframe.`
+      : "Add a final sentence with a specific action, owner, and timeline.",
+    targetType: "phrase",
+    targetIndex: introIndex,
+    originalTextSnippet: diagnostics.ctaSentence ?? diagnostics.intro,
+    suggestedReplacementText: diagnostics.ctaSentence
+      ? `${diagnostics.ctaSentence} Include one measurable next step and a timeframe.`
+      : "Add a final sentence with a specific action, owner, and timeline.",
+    impact: "High",
+    projectedGain: 7,
+    category: "CTA",
+  });
+
+  return suggestions.slice(0, 10);
+}
+
+function normalizeSuggestionsWithRecovery(input: {
+  value: unknown;
+  diagnostics: DocumentDiagnostics;
+  requestId: string;
+}): SeoSuggestion[] {
+  const { value, diagnostics, requestId } = input;
+
+  try {
+    const suggestions = normalizeSuggestions(value, diagnostics);
+    if (suggestions.length > 0) {
+      return suggestions;
+    }
+  } catch (error) {
+    console.error("[Cenzer SEO][Model] Suggestion normalization failed", {
+      stage: "response-validation",
+      requestId,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+  }
+
+  const fallback = buildHeuristicFallbackSuggestions(diagnostics);
+
+  if (fallback.length > 0) {
+    console.warn("[Cenzer SEO][Model] Using heuristic suggestion recovery", {
+      stage: "response-validation",
+      requestId,
+      suggestions: fallback.length,
+    });
+    return fallback;
+  }
+
+  throw new Error("[stage=response-validation] Suggestions were missing and recovery failed.");
+}
+
+function buildPrompt(input: DocumentDiagnostics, prepared: PreparedModelContext) {
   return [
     "You are Cenzer, an expert SEO optimization engine for marketing documents.",
     "Evaluate the document using these rules:",
@@ -520,25 +881,25 @@ function buildPrompt(input: DocumentDiagnostics) {
       {
         fileName: input.fileName,
         wordCount: input.wordCount,
-        title: input.title,
-        intro: input.intro,
-        headings: input.headings,
+        title: prepared.title,
+        intro: prepared.intro,
+        headings: prepared.headings,
         topKeywords: input.topKeywords,
         readabilitySentenceLength: Number(input.readabilitySentenceLength.toFixed(1)),
-        ctaSentence: input.ctaSentence,
+        ctaSentence: prepared.ctaSentence,
         heuristicBaseline: {
           overallScore: input.heuristicOverallScore,
           scoreBreakdown: input.heuristicBreakdown,
         },
-        previewBlocks: input.previewBlocks.slice(0, 120).map((block) => ({
-          id: block.id,
-          index: block.index,
-          type: block.kind,
-          content: block.text,
-          listLevel: block.listLevel,
-          listOrder: block.listOrder,
-        })),
-        documentExcerpt: input.documentText.slice(0, 14000),
+        contentStrategy: {
+          wasReduced: prepared.wasReduced,
+          originalChars: prepared.originalChars,
+          analyzedChars: prepared.analyzedChars,
+          droppedParagraphEstimate: prepared.droppedParagraphEstimate,
+          keyBodySections: prepared.keyBodySections,
+        },
+        previewBlocks: prepared.previewBlocks,
+        documentExcerpt: prepared.excerpt,
       },
       null,
       2,
@@ -560,15 +921,19 @@ function buildRepairPrompt(rawModelResponse: string) {
   ].join("\n");
 }
 
-async function parseModelPayloadWithRepair(rawModelResponse: string) {
+async function parseModelPayloadWithRepair(rawModelResponse: string, context: ModelRequestContext) {
   const isDev = process.env.NODE_ENV !== "production";
 
   console.info("[Cenzer SEO][Model] Raw model response length", {
+    stage: "model-json-parse",
+    requestId: context.requestId,
     characters: rawModelResponse.length,
   });
 
   if (isDev) {
     console.info("[Cenzer SEO][Model] Raw response preview", {
+      stage: "model-json-parse",
+      requestId: context.requestId,
       preview: getDevLogSnippet(rawModelResponse, 500),
     });
   }
@@ -580,6 +945,8 @@ async function parseModelPayloadWithRepair(rawModelResponse: string) {
   } catch (error) {
     if (isDev) {
       console.error("[Cenzer SEO][Model] JSON extraction failed", {
+        stage: "model-json-parse",
+        requestId: context.requestId,
         rawPreview: getDevLogSnippet(rawModelResponse, 500),
       });
     }
@@ -587,19 +954,27 @@ async function parseModelPayloadWithRepair(rawModelResponse: string) {
   }
 
   console.info("[Cenzer SEO][Model] Extracted JSON candidate length", {
+    stage: "model-json-parse",
+    requestId: context.requestId,
     characters: candidate.length,
   });
 
   try {
     const parsed = tryParseJson("model-json-parse-primary", candidate);
-    console.info("[Cenzer SEO][Model] JSON parse success", { stage: "primary" });
+    console.info("[Cenzer SEO][Model] JSON parse success", {
+      stage: "model-json-parse",
+      requestId: context.requestId,
+      attempt: "primary",
+    });
     return parsed;
   } catch (primaryError) {
     const sanitized = sanitizeJsonCandidate(candidate);
 
     if (isDev) {
       console.error("[Cenzer SEO][Model] JSON parse failed", {
-        stage: "primary",
+        stage: "model-json-parse",
+        requestId: context.requestId,
+        attempt: "primary",
         error: primaryError instanceof Error ? primaryError.message : "unknown",
         candidatePreview: getDevLogSnippet(candidate, 500),
       });
@@ -608,12 +983,18 @@ async function parseModelPayloadWithRepair(rawModelResponse: string) {
     if (sanitized !== candidate) {
       try {
         const parsedSanitized = tryParseJson("model-json-parse-sanitized", sanitized);
-        console.info("[Cenzer SEO][Model] JSON parse success", { stage: "sanitized" });
+        console.info("[Cenzer SEO][Model] JSON parse success", {
+          stage: "model-json-parse",
+          requestId: context.requestId,
+          attempt: "sanitized",
+        });
         return parsedSanitized;
       } catch (sanitizedError) {
         if (isDev) {
           console.error("[Cenzer SEO][Model] JSON parse failed", {
-            stage: "sanitized",
+            stage: "model-json-parse",
+            requestId: context.requestId,
+            attempt: "sanitized",
             error: sanitizedError instanceof Error ? sanitizedError.message : "unknown",
             candidatePreview: getDevLogSnippet(sanitized, 500),
           });
@@ -624,14 +1005,19 @@ async function parseModelPayloadWithRepair(rawModelResponse: string) {
     const repairedRaw = await requestAnthropicText({
       prompt: buildRepairPrompt(rawModelResponse),
       mode: "repair",
+      context,
     });
 
     console.info("[Cenzer SEO][Model] Repair response received", {
+      stage: "model-json-parse",
+      requestId: context.requestId,
       characters: repairedRaw.length,
     });
 
     if (isDev) {
       console.info("[Cenzer SEO][Model] Repair response preview", {
+        stage: "model-json-parse",
+        requestId: context.requestId,
         preview: getDevLogSnippet(repairedRaw, 500),
       });
     }
@@ -639,23 +1025,35 @@ async function parseModelPayloadWithRepair(rawModelResponse: string) {
     const repairedCandidate = extractJsonCandidate(repairedRaw);
 
     console.info("[Cenzer SEO][Model] Repaired JSON candidate length", {
+      stage: "model-json-parse",
+      requestId: context.requestId,
       characters: repairedCandidate.length,
     });
 
     try {
       const repairedParsed = tryParseJson("model-json-parse-repair", repairedCandidate);
-      console.info("[Cenzer SEO][Model] JSON parse success", { stage: "repair" });
+      console.info("[Cenzer SEO][Model] JSON parse success", {
+        stage: "model-json-parse",
+        requestId: context.requestId,
+        attempt: "repair",
+      });
       return repairedParsed;
     } catch (repairError) {
       if (isDev) {
         console.error("[Cenzer SEO][Model] JSON parse failed", {
-          stage: "repair",
+          stage: "model-json-parse",
+          requestId: context.requestId,
+          attempt: "repair",
           error: repairError instanceof Error ? repairError.message : "unknown",
           candidatePreview: getDevLogSnippet(repairedCandidate, 500),
         });
       }
 
-      throw repairError;
+      throw new Error(
+        `[stage=model-json-parse] Final JSON parse failed after recovery: ${
+          repairError instanceof Error ? repairError.message : "unknown"
+        }`,
+      );
     }
   }
 }
@@ -679,26 +1077,53 @@ function computeRealisticProjectedScore(input: {
 
 export async function analyzeWithCenzerModel(
   diagnostics: DocumentDiagnostics,
+  context: ModelRequestContext,
 ): Promise<SeoAnalysisResult> {
   console.info("[Cenzer SEO][Model] Analysis started", {
+    stage: "model-request",
+    requestId: context.requestId,
     fileName: diagnostics.fileName,
     wordCount: diagnostics.wordCount,
   });
 
-  const prompt = buildPrompt(diagnostics);
+  const prepared = prepareModelContext(diagnostics);
+
+  console.info("[Cenzer SEO][Model] Document preprocessing complete", {
+    stage: "model-request",
+    requestId: context.requestId,
+    wasReduced: prepared.wasReduced,
+    originalChars: prepared.originalChars,
+    analyzedChars: prepared.analyzedChars,
+    previewBlocks: prepared.previewBlocks.length,
+    keyBodySections: prepared.keyBodySections.length,
+    droppedParagraphEstimate: prepared.droppedParagraphEstimate,
+  });
+
+  const prompt = buildPrompt(diagnostics, prepared);
   const outputText = await requestAnthropicText({
     prompt,
     mode: "analysis",
+    context,
   });
 
   let payload: ModelAnalysisPayload;
 
   try {
-    payload = await parseModelPayloadWithRepair(outputText);
+    payload = await parseModelPayloadWithRepair(outputText, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown parse failure.";
     throw new Error(message);
   }
+
+  console.info("[Cenzer SEO][Model] Response payload checkpoints", {
+    stage: "response-validation",
+    requestId: context.requestId,
+    hasOverallScore: typeof payload.overallScore === "number",
+    hasProjectedScore: typeof payload.projectedScore === "number",
+    hasStatus: typeof payload.status === "string",
+    hasScoreBreakdown: typeof payload.scoreBreakdown === "object" && payload.scoreBreakdown !== null,
+    hasSuggestions: Array.isArray(payload.suggestions),
+  });
 
   const scoreBreakdown = normalizeBreakdown(payload.scoreBreakdown, diagnostics.heuristicBreakdown);
   const overallScore = clampScore(asInteger(payload.overallScore, diagnostics.heuristicOverallScore));
@@ -706,13 +1131,16 @@ export async function analyzeWithCenzerModel(
     overallScore,
     clampScore(asInteger(payload.projectedScore, Math.min(100, overallScore + 14))),
   );
+  const status = normalizeStatus(payload.status, overallScore);
 
-  let suggestions: SeoSuggestion[];
-  try {
-    suggestions = normalizeSuggestions(payload.suggestions, diagnostics);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown suggestion normalization error";
-    throw new Error(`[model-normalize] ${message}`);
+  const suggestions = normalizeSuggestionsWithRecovery({
+    value: payload.suggestions,
+    diagnostics,
+    requestId: context.requestId,
+  });
+
+  if (suggestions.length < 1) {
+    throw new Error("[stage=response-validation] Suggestion list is empty after recovery.");
   }
 
   const projectedScore = computeRealisticProjectedScore({
@@ -722,9 +1150,12 @@ export async function analyzeWithCenzerModel(
   });
 
   console.info("[Cenzer SEO][Model] Analysis complete", {
+    stage: "response-validation",
+    requestId: context.requestId,
     overallScore,
     projectedScore,
     suggestions: suggestions.length,
+    status,
   });
 
   return {
@@ -736,7 +1167,7 @@ export async function analyzeWithCenzerModel(
     overallScore,
     currentScore: overallScore,
     projectedScore,
-    status: normalizeStatus(payload.status, overallScore),
+    status,
     scoreBreakdown,
     previewBlocks: normalizePreviewBlocks(payload.previewBlocks, diagnostics.previewBlocks),
     suggestions,
