@@ -358,13 +358,7 @@ export function SeoCheckerWorkspace() {
       resetState();
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      const isDev = process.env.NODE_ENV !== "production";
-
-      if (isDev && message) {
-        setUploadError(`Finalize failed: ${message}`);
-      } else {
-        setUploadError("Unable to generate the final .docx output. Please try again.");
-      }
+      setUploadError(message || "Unable to generate the final .docx output. Please try again.");
     } finally {
       setIsDownloading(false);
     }

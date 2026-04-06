@@ -22,6 +22,38 @@ export type ParsedDocxStructure = {
   plainText: string;
 };
 
+type DocxGenerationContext = {
+  requestId?: string;
+};
+
+const MAX_REPLACEMENT_TEXT_CHARS = 12_000;
+const MAX_SUMMARY_TEXT_CHARS = 8_000;
+
+function getDocxLogContext(context?: DocxGenerationContext) {
+  return {
+    requestId: context?.requestId ?? null,
+  };
+}
+
+function sanitizeDocxTextContent(value: string, maxChars = MAX_REPLACEMENT_TEXT_CHARS) {
+  const normalized = (value || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\u2028\u2029]/g, "\n");
+
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return normalized.slice(0, maxChars);
+}
+
+function getSafeDocxPreview(value: string, maxChars = 240) {
+  return sanitizeDocxTextContent(value, maxChars).replace(/\s+/g, " ").trim();
+}
+
 function decodeXmlText(value: string) {
   return value
     .replace(/&lt;/g, "<")
@@ -182,6 +214,8 @@ function getParagraphPropertiesXml(paragraphXml: string) {
 }
 
 function buildCalibriRunXml(text: string) {
+  const safeText = sanitizeDocxTextContent(text);
+
   return [
     "<w:r>",
     "<w:rPr>",
@@ -189,7 +223,7 @@ function buildCalibriRunXml(text: string) {
     '<w:sz w:val="22"/>',
     '<w:szCs w:val="22"/>',
     "</w:rPr>",
-    `<w:t xml:space="preserve">${encodeXmlText(text)}</w:t>`,
+    `<w:t xml:space="preserve">${encodeXmlText(safeText)}</w:t>`,
     "</w:r>",
   ].join("");
 }
@@ -227,9 +261,15 @@ function applySuggestionToParagraph(input: {
   suggestion: SeoSuggestion;
 }) {
   const { paragraph, suggestion } = input;
-  const originalText = paragraph.text;
-  const find = suggestion.originalTextSnippet.trim() || suggestion.currentText.trim();
-  const replacement = suggestion.suggestedReplacementText.trim() || suggestion.suggestedText.trim();
+  const originalText = sanitizeDocxTextContent(paragraph.text);
+  const find = sanitizeDocxTextContent(
+    suggestion.originalTextSnippet.trim() || suggestion.currentText.trim(),
+    6_000,
+  );
+  const replacement = sanitizeDocxTextContent(
+    suggestion.suggestedReplacementText.trim() || suggestion.suggestedText.trim(),
+    MAX_REPLACEMENT_TEXT_CHARS,
+  );
 
   if (!replacement) {
     return null;
@@ -266,6 +306,7 @@ function applySuggestionToParagraph(input: {
 }
 
 function buildSummaryParagraphXml(text: string, headingLevel?: 1 | 2) {
+  const safeText = sanitizeDocxTextContent(text, MAX_SUMMARY_TEXT_CHARS);
   const pPr =
     headingLevel === 1
       ? '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
@@ -273,7 +314,7 @@ function buildSummaryParagraphXml(text: string, headingLevel?: 1 | 2) {
         ? '<w:pPr><w:pStyle w:val="Heading2"/></w:pPr>'
         : "";
 
-  return `<w:p>${pPr}${buildCalibriRunXml(text)}</w:p>`;
+  return `<w:p>${pPr}${buildCalibriRunXml(safeText)}</w:p>`;
 }
 
 function buildSummaryXml(input: {
@@ -361,6 +402,7 @@ export async function applyAcceptedSuggestionsToDocx(input: {
   rejectedSuggestionIds: string[];
   projectedScore: number;
   timestamp: string;
+  context?: DocxGenerationContext;
 }) {
   const {
     originalDocxBuffer,
@@ -369,27 +411,71 @@ export async function applyAcceptedSuggestionsToDocx(input: {
     rejectedSuggestionIds,
     projectedScore,
     timestamp,
+    context,
   } = input;
 
-  const parsed = await parseDocxStructure(originalDocxBuffer);
+  const logContext = getDocxLogContext(context);
+
+  console.info("[Cenzer SEO][Finalize][Docx] Generation started", {
+    ...logContext,
+    stage: "docx-template-load",
+    fileName: analysis.fileName,
+    originalBufferBytes: originalDocxBuffer.byteLength,
+    suggestionCount: analysis.suggestions.length,
+    acceptedCount: acceptedSuggestionIds.length,
+    rejectedCount: rejectedSuggestionIds.length,
+  });
+
+  let parsed: ParsedDocxStructure;
+
+  try {
+    parsed = await parseDocxStructure(originalDocxBuffer);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown template parse error.";
+    throw new Error(`[stage=docx-template-load] ${message}`);
+  }
+
+  console.info("[Cenzer SEO][Finalize][Docx] Template parsed", {
+    ...logContext,
+    stage: "docx-template-load",
+    paragraphCount: parsed.paragraphs.length,
+    documentXmlChars: parsed.documentXml.length,
+  });
+
   const acceptedSet = new Set(acceptedSuggestionIds);
   const accepted = analysis.suggestions.filter((suggestion) => acceptedSet.has(suggestion.id));
   const updatedParagraphXmlByIndex = new Map<number, string>();
   const appliedChanges: string[] = [];
 
+  console.info("[Cenzer SEO][Finalize][Docx] Applying accepted suggestions", {
+    ...logContext,
+    stage: "docx-document-update",
+    acceptedSuggestions: accepted.length,
+  });
+
   for (const suggestion of accepted) {
-    const index = resolveTargetIndex(suggestion, parsed.paragraphs);
+    const safeSuggestion: SeoSuggestion = {
+      ...suggestion,
+      title: sanitizeDocxTextContent(suggestion.title, 500),
+      reason: sanitizeDocxTextContent(suggestion.reason, 2_000),
+      currentText: sanitizeDocxTextContent(suggestion.currentText, 8_000),
+      suggestedText: sanitizeDocxTextContent(suggestion.suggestedText, 8_000),
+      originalTextSnippet: sanitizeDocxTextContent(suggestion.originalTextSnippet, 8_000),
+      suggestedReplacementText: sanitizeDocxTextContent(suggestion.suggestedReplacementText, 8_000),
+    };
+
+    const index = resolveTargetIndex(safeSuggestion, parsed.paragraphs);
 
     if (index < 0) {
-      appliedChanges.push(`${suggestion.title}: target not found in original document.`);
+      appliedChanges.push(`${safeSuggestion.title}: target not found in original document.`);
       continue;
     }
 
     const paragraph = parsed.paragraphs[index];
-    const update = applySuggestionToParagraph({ paragraph, suggestion });
+    const update = applySuggestionToParagraph({ paragraph, suggestion: safeSuggestion });
 
     if (!update || update.nextText === paragraph.text) {
-      appliedChanges.push(`${suggestion.title}: no inline change applied.`);
+      appliedChanges.push(`${safeSuggestion.title}: no inline change applied.`);
       continue;
     }
 
@@ -429,19 +515,43 @@ export async function applyAcceptedSuggestionsToDocx(input: {
     rejectedTitles: analysis.suggestions
       .filter((item) => rejectedSuggestionIds.includes(item.id))
       .map((item) => item.title),
-    timestamp,
+    timestamp: sanitizeDocxTextContent(timestamp, 120),
   });
 
   if (!updatedDocumentXml.includes("</w:body>")) {
-    throw new Error("[docx-xml] Could not append summary because </w:body> was not found.");
+    throw new Error(
+      "[stage=docx-document-update] [docx-xml] Could not append summary because </w:body> was not found.",
+    );
   }
 
   updatedDocumentXml = updatedDocumentXml.replace("</w:body>", `${summaryXml}</w:body>`);
 
   parsed.zip.file(DOCUMENT_XML_PATH, updatedDocumentXml);
-  const updatedBuffer = await parsed.zip.generateAsync({
-    type: "nodebuffer",
-    compression: "DEFLATE",
+
+  console.info("[Cenzer SEO][Finalize][Docx] Updated document XML prepared", {
+    ...logContext,
+    stage: "docx-document-update",
+    updatedXmlChars: updatedDocumentXml.length,
+    appliedChanges: appliedChanges.length,
+    sampleAppliedChange: appliedChanges[0] ? getSafeDocxPreview(appliedChanges[0]) : null,
+  });
+
+  let updatedBuffer: Buffer;
+
+  try {
+    updatedBuffer = await parsed.zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown buffer generation error.";
+    throw new Error(`[stage=docx-buffer-generate] ${message}`);
+  }
+
+  console.info("[Cenzer SEO][Finalize][Docx] Buffer generated", {
+    ...logContext,
+    stage: "docx-buffer-generate",
+    outputBytes: updatedBuffer.byteLength,
   });
 
   return {
