@@ -173,7 +173,7 @@ function projectedGainByImpact(impact: SeoSuggestion["impact"]) {
   return 3;
 }
 
-function stripCodeFences(raw: string) {
+function cleanModelOutput(raw: string) {
   return raw
     .replace(/^\uFEFF/, "")
     .replace(/^\s*```(?:json)?\s*/i, "")
@@ -181,6 +181,18 @@ function stripCodeFences(raw: string) {
     .replace(/```json/gi, "")
     .replace(/```/g, "")
     .trim();
+}
+
+function extractFirstJsonObject(rawModelText: string) {
+  const cleaned = cleanModelOutput(rawModelText);
+  const firstOpen = cleaned.indexOf("{");
+  const lastClose = cleaned.lastIndexOf("}");
+
+  if (firstOpen < 0 || lastClose <= firstOpen) {
+    return null;
+  }
+
+  return cleaned.slice(firstOpen, lastClose + 1).trim();
 }
 
 function sanitizeJsonCandidate(candidate: string) {
@@ -198,15 +210,17 @@ function sanitizeJsonCandidate(candidate: string) {
 function parseJsonCandidateSafely(input: {
   candidate: string;
   context: ModelRequestContext;
-  attempt: "primary" | "sanitized" | "repair";
+  attempt: string;
+  candidateIndex: number;
 }) {
-  const { candidate, context, attempt } = input;
+  const { candidate, context, attempt, candidateIndex } = input;
   const isDev = process.env.NODE_ENV !== "production";
 
   console.info("[Cenzer SEO][Model] Extracted JSON candidate length", {
     stage: "model-json-parse",
     requestId: context.requestId,
     attempt,
+    candidateIndex,
     characters: candidate.length,
   });
 
@@ -219,6 +233,7 @@ function parseJsonCandidateSafely(input: {
       stage: "model-json-parse",
       requestId: context.requestId,
       attempt,
+      candidateIndex,
       error: message,
     };
 
@@ -236,38 +251,78 @@ function getDevLogSnippet(value: string, maxLength = 500) {
   return value.slice(0, maxLength).replace(/\s+/g, " ").trim();
 }
 
-function extractJsonCandidateFromRawText(input: {
-  rawModelText: string;
-  context: ModelRequestContext;
-  attempt: "primary" | "sanitized" | "repair";
-}) {
-  const { rawModelText, context, attempt } = input;
-  const isDev = process.env.NODE_ENV !== "production";
-  const normalized = stripCodeFences(rawModelText);
-  const start = normalized.indexOf("{");
-  const end = normalized.lastIndexOf("}");
+function getSafeModelSnippet(value: string, maxLength = 360) {
+  return getDevLogSnippet(value, maxLength).replace(/[|]/g, "/");
+}
 
-  if (isDev) {
-    console.info("[Cenzer SEO][Model] Raw response preview", {
-      stage: "model-json-parse",
-      requestId: context.requestId,
-      attempt,
-      preview: getDevLogSnippet(rawModelText, 500),
-    });
+function extractTopLevelJsonCandidates(input: string) {
+  const candidates: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = false;
+      }
+
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) {
+        start = index;
+      }
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      if (depth > 0) {
+        depth -= 1;
+      }
+
+      if (depth === 0 && start >= 0) {
+        candidates.push(input.slice(start, index + 1).trim());
+        start = -1;
+      }
+    }
   }
 
-  if (start < 0 || end <= start) {
-    console.error("[Cenzer SEO][Model] JSON extraction failed", {
-      stage: "model-json-parse",
-      requestId: context.requestId,
-      attempt,
-      start,
-      end,
-    });
-    throw new Error("[stage=model-json-parse] Could not locate a complete JSON object in model response.");
+  return candidates;
+}
+
+function extractJsonCandidatesFromMixedText(rawModelText: string) {
+  const normalized = cleanModelOutput(rawModelText);
+  const candidates: string[] = [];
+  const firstJsonObject = extractFirstJsonObject(normalized);
+
+  if (firstJsonObject) {
+    candidates.push(firstJsonObject);
   }
 
-  return normalized.slice(start, end + 1).trim();
+  candidates.push(...extractTopLevelJsonCandidates(normalized));
+
+  return [...new Set(candidates.map((candidate) => candidate.trim()).filter(Boolean))];
 }
 
 async function requestAnthropicText(input: {
@@ -766,6 +821,8 @@ function buildPrompt(input: DocumentDiagnostics, prepared: PreparedModelContext)
     "Do not use code fences.",
     "Do not include any explanation.",
     "Do not include any text before or after the JSON.",
+    "The output must start with '{' and end with '}'.",
+    "Return JSON only. Never return prose, markdown, or commentary.",
     "Do not include trailing commas.",
     "All strings must use standard double quotes.",
     "The response must be directly parseable by JSON.parse.",
@@ -828,32 +885,86 @@ function parseJsonObjectFromModelText(input: {
   context: ModelRequestContext;
   attempt: "primary" | "sanitized" | "repair";
 }) {
-  const candidate = extractJsonCandidateFromRawText(input);
-  const parsed = parseJsonCandidateSafely({
-    candidate,
-    context: input.context,
-    attempt: input.attempt,
-  });
+  const rawSnippet = getSafeModelSnippet(input.rawModelText, 500);
 
-  console.info("[Cenzer SEO][Model] JSON parse success", {
+  console.info("[Cenzer SEO][Model] Raw model output before parse", {
     stage: "model-json-parse",
     requestId: input.context.requestId,
     attempt: input.attempt,
+    snippet: rawSnippet,
   });
 
-  return {
-    candidate,
-    parsed,
-  };
+  const rawCandidates = extractJsonCandidatesFromMixedText(input.rawModelText);
+
+  if (rawCandidates.length < 1) {
+    throw new Error(
+      `[stage=model-json-parse] Could not locate a complete JSON object in model response. | rawSnippet=${rawSnippet}`,
+    );
+  }
+
+  let lastErrorMessage = "Unknown JSON parse failure.";
+
+  for (let index = 0; index < rawCandidates.length; index += 1) {
+    const candidate = sanitizeJsonCandidate(rawCandidates[index]);
+
+    try {
+      const parsed = parseJsonCandidateSafely({
+        candidate,
+        context: input.context,
+        attempt: input.attempt,
+        candidateIndex: index + 1,
+      });
+
+      console.info("[Cenzer SEO][Model] JSON parse success", {
+        stage: "model-json-parse",
+        requestId: input.context.requestId,
+        attempt: input.attempt,
+        candidateIndex: index + 1,
+      });
+
+      return {
+        candidate,
+        parsed,
+      };
+    } catch (error) {
+      lastErrorMessage = error instanceof Error ? error.message : "Unknown JSON parse error.";
+    }
+  }
+
+  throw new Error(
+    `[stage=model-json-parse] ${input.attempt}: Unable to parse extracted JSON candidates. ${lastErrorMessage} | rawSnippet=${rawSnippet}`,
+  );
 }
 
 async function parseModelPayloadWithRepair(rawModelResponse: string, context: ModelRequestContext) {
   const isDev = process.env.NODE_ENV !== "production";
+  const rawSnippet = getSafeModelSnippet(rawModelResponse, 500);
+
+  const buildParseFallbackPayload = (reason: string, snippet: string): ModelAnalysisPayload => {
+    console.warn("[Cenzer SEO][Model] Returning parse fallback payload", {
+      stage: "model-json-parse",
+      requestId: context.requestId,
+      reason,
+      snippet,
+    });
+
+    return {
+      error: `Unable to generate valid SEO analysis. ${reason} | rawSnippet=${snippet}`,
+      suggestions: [],
+      previewBlocks: [],
+    };
+  };
 
   console.info("[Cenzer SEO][Model] Raw model response length", {
     stage: "model-json-parse",
     requestId: context.requestId,
     characters: rawModelResponse.length,
+  });
+
+  console.info("[Cenzer SEO][Model] Raw response snippet", {
+    stage: "model-json-parse",
+    requestId: context.requestId,
+    snippet: rawSnippet,
   });
 
   try {
@@ -864,43 +975,41 @@ async function parseModelPayloadWithRepair(rawModelResponse: string, context: Mo
     });
     return primaryParsed.parsed;
   } catch (primaryError) {
-    let repairSeed = stripCodeFences(rawModelResponse);
+    const repairSeed = sanitizeJsonCandidate(cleanModelOutput(rawModelResponse));
 
     try {
-      const extracted = extractJsonCandidateFromRawText({
-        rawModelText: rawModelResponse,
+      const sanitizedParsed = parseJsonObjectFromModelText({
+        rawModelText: repairSeed,
         context,
-        attempt: "primary",
+        attempt: "sanitized",
       });
-
-      const sanitized = sanitizeJsonCandidate(extracted);
-      repairSeed = sanitized;
-
-      if (sanitized !== extracted) {
-        try {
-          const sanitizedParsed = parseJsonObjectFromModelText({
-            rawModelText: sanitized,
-            context,
-            attempt: "sanitized",
-          });
-          return sanitizedParsed.parsed;
-        } catch {
-          // Fall through to repair request.
-        }
-      }
+      return sanitizedParsed.parsed;
     } catch (extractError) {
-      console.warn("[Cenzer SEO][Model] Primary extraction unavailable; proceeding to repair.", {
+      console.warn("[Cenzer SEO][Model] Sanitized parse failed; proceeding to repair.", {
         stage: "model-json-parse",
         requestId: context.requestId,
         error: extractError instanceof Error ? extractError.message : "unknown",
       });
     }
 
-    const repairedRaw = await requestAnthropicText({
-      prompt: buildRepairPrompt(repairSeed),
-      mode: "repair",
-      context,
-    });
+    let repairedRaw = "";
+
+    try {
+      repairedRaw = await requestAnthropicText({
+        prompt: buildRepairPrompt(repairSeed),
+        mode: "repair",
+        context,
+      });
+    } catch (repairRequestError) {
+      return buildParseFallbackPayload(
+        `Repair request failed: ${
+          repairRequestError instanceof Error
+            ? repairRequestError.message
+            : "unknown repair request error"
+        }`,
+        rawSnippet,
+      );
+    }
 
     console.info("[Cenzer SEO][Model] Repair response received", {
       stage: "model-json-parse",
@@ -924,14 +1033,16 @@ async function parseModelPayloadWithRepair(rawModelResponse: string, context: Mo
       });
       return repairedParsed.parsed;
     } catch (repairError) {
-      throw new Error(
-        `[stage=model-json-parse] Final JSON parse failed after recovery: ${
+      const repairedSnippet = getSafeModelSnippet(repairedRaw, 500);
+      return buildParseFallbackPayload(
+        `Final JSON parse failed after recovery: ${
           repairError instanceof Error
             ? repairError.message
             : primaryError instanceof Error
               ? primaryError.message
               : "unknown"
         }`,
+        repairedSnippet,
       );
     }
   }
@@ -1025,14 +1136,7 @@ export async function analyzeWithCenzerModel(
     context,
   });
 
-  let payload: ModelAnalysisPayload;
-
-  try {
-    payload = await parseModelPayloadWithRepair(outputText, context);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown parse failure.";
-    throw new Error(message);
-  }
+  const payload = await parseModelPayloadWithRepair(outputText, context);
 
   console.info("[Cenzer SEO][Model] Response payload checkpoints", {
     stage: "response-validation",

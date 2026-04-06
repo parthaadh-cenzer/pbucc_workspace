@@ -33,6 +33,11 @@ function parseStageFromErrorMessage(message: string) {
   return legacyStage ?? "analyze";
 }
 
+function extractRawSnippetFromErrorMessage(message: string) {
+  const match = message.match(/\|\s*rawSnippet=([^|]+)(?:\||$)/i);
+  return match?.[1]?.trim() ?? null;
+}
+
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID().slice(0, 8);
   console.info("[Cenzer SEO][Analyze] API route entered", { requestId });
@@ -236,6 +241,8 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "Unknown analysis error.";
     const stage = parseStageFromErrorMessage(message);
     const status = stage === "model-request-timeout" ? 504 : 500;
+    const modelOutputSnippet =
+      stage === "model-json-parse" ? extractRawSnippetFromErrorMessage(message) : null;
 
     console.error("[Cenzer SEO][Analyze] Analysis pipeline failed", {
       requestId,
@@ -243,13 +250,27 @@ export async function POST(request: Request) {
       message,
     });
 
-    return NextResponse.json(
-      {
-        error: "Failed to analyze this document.",
-        stage,
-        requestId,
-      },
-      { status },
-    );
+    const errorPayload: {
+      error: string;
+      stage: string;
+      requestId: string;
+      detail?: string;
+      modelOutputSnippet?: string;
+    } = {
+      error: "Failed to analyze this document.",
+      stage,
+      requestId,
+    };
+
+    if (stage === "model-json-parse") {
+      errorPayload.detail =
+        "Model returned malformed JSON after recovery attempts. A safe output snippet is included.";
+
+      if (modelOutputSnippet) {
+        errorPayload.modelOutputSnippet = modelOutputSnippet;
+      }
+    }
+
+    return NextResponse.json(errorPayload, { status });
   }
 }
