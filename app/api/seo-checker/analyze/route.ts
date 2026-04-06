@@ -6,7 +6,7 @@ import {
 } from "@/lib/seo-checker-document";
 import { getDocxBufferFromFile, parseDocxStructure } from "@/lib/seo-checker-docx-structure";
 import { saveSeoAnalysisSession } from "@/lib/seo-checker-session-store";
-import { getMarketingSessionUser, unauthorized } from "@/lib/security";
+import { getDemoWorkspaceSelectionFromCookies } from "@/lib/demo-mode";
 
 export const runtime = "nodejs";
 
@@ -15,13 +15,14 @@ const MAX_DOCX_SIZE_BYTES = 12 * 1024 * 1024;
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID().slice(0, 8);
   console.info("[Cenzer SEO][Analyze] API route entered", { requestId });
+  const selection = await getDemoWorkspaceSelectionFromCookies();
 
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    console.warn("[Cenzer SEO][Analyze] Unauthorized request", { requestId });
-    return unauthorized();
-  }
+  console.info("[Cenzer SEO][Analyze] Request context", {
+    requestId,
+    teamId: selection?.team.id ?? null,
+    userId: selection?.user.id ?? null,
+    userName: selection?.user.name ?? null,
+  });
 
   let formData: FormData;
 

@@ -1,3 +1,5 @@
+import "server-only";
+
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 
 type AnthropicRuntimeConfig = {
@@ -32,6 +34,13 @@ export function getAnthropicRuntimeConfig(): AnthropicRuntimeConfig {
 
   if (!apiKey) {
     throw new Error("[config] ANTHROPIC_API_KEY is missing.");
+  }
+
+  if (!apiKey.startsWith("sk-ant-")) {
+    console.warn("[Cenzer Runtime][Anthropic] API key does not match expected prefix.", {
+      hasApiKey: true,
+      keyLength: apiKey.length,
+    });
   }
 
   return {

@@ -3,7 +3,6 @@ import { applyAcceptedSuggestionsToDocx } from "@/lib/seo-checker-docx-structure
 import { createUploadDateLabel } from "@/lib/seo-checker-document";
 import { deleteSeoAnalysisSession, getSeoAnalysisSession } from "@/lib/seo-checker-session-store";
 import type { SeoFinalizeRequest } from "@/lib/seo-checker-types";
-import { getMarketingSessionUser, unauthorized } from "@/lib/security";
 
 export const runtime = "nodejs";
 
@@ -18,12 +17,6 @@ function sanitizeFileStem(fileName: string) {
 }
 
 export async function POST(request: Request) {
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    return unauthorized();
-  }
-
   let body: SeoFinalizeRequest;
 
   try {
@@ -97,7 +90,6 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("[Cenzer SEO][Finalize] Failed", {
       error: error instanceof Error ? error.message : "unknown",
-      userId: user.id,
     });
 
     return NextResponse.json(

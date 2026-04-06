@@ -1,3 +1,4 @@
+import "server-only";
 import type { DocumentDiagnostics } from "@/lib/seo-checker-document";
 import type {
   SeoAnalysisResult,
@@ -8,8 +9,8 @@ import type {
   SeoSuggestionCategory,
   SeoSuggestionTargetType,
 } from "@/lib/seo-checker-types";
+import { getAnthropicRuntimeConfig } from "@/lib/cenzer-runtime";
 
-const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
 type AnthropicTextBlock = {
@@ -195,17 +196,29 @@ async function requestAnthropicText(input: {
   mode: "analysis" | "repair";
 }) {
   const { prompt, mode } = input;
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  const model = process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL;
+  let runtimeConfig;
+
+  try {
+    runtimeConfig = getAnthropicRuntimeConfig();
+  } catch (error) {
+    const configuredModel = process.env.ANTHROPIC_MODEL?.trim() || "(default)";
+    console.error("[Cenzer SEO][Model] Anthropic runtime configuration invalid", {
+      mode,
+      hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+      model: configuredModel,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    throw error;
+  }
+
+  const { apiKey, model } = runtimeConfig;
 
   console.info("[Cenzer SEO][Model] Request configuration", {
     mode,
     model,
+    hasApiKey: true,
+    keyLength: apiKey.length,
   });
-
-  if (!apiKey) {
-    throw new Error("[config] ANTHROPIC_API_KEY is missing.");
-  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
@@ -257,8 +270,23 @@ async function requestAnthropicText(input: {
 
   if (!response.ok) {
     const failureText = await response.text();
+    const providerRequestId =
+      response.headers.get("request-id") || response.headers.get("x-request-id") || null;
+
+    if (response.status === 401 || response.status === 403) {
+      console.error("[Cenzer SEO][Model] Anthropic authorization failure", {
+        mode,
+        model,
+        status: response.status,
+        hasApiKey: true,
+        keyLength: apiKey.length,
+        providerRequestId,
+        detail: failureText.slice(0, 300),
+      });
+    }
+
     throw new Error(
-      `[anthropic-http] Provider ${mode} request failed (${response.status}): ${failureText.slice(0, 300)}`,
+      `[anthropic-http-${response.status}] Provider ${mode} request failed (${response.status}): ${failureText.slice(0, 300)}`,
     );
   }
 
