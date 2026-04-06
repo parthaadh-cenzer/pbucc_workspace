@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { deleteShortLink, updateShortLink } from "@/lib/short-link-service";
-import { getMarketingSessionUser, unauthorized } from "@/lib/security";
 import type { UpdateShortLinkInput } from "@/lib/short-link-types";
 
 export const runtime = "nodejs";
@@ -11,11 +10,6 @@ type RouteContext = {
 
 export async function PATCH(request: Request, context: RouteContext) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    return unauthorized();
-  }
 
   const { id } = await context.params;
   const shortLinkId = id?.trim();
@@ -59,11 +53,6 @@ export async function PATCH(request: Request, context: RouteContext) {
 
 export async function DELETE(_: Request, context: RouteContext) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    return unauthorized();
-  }
 
   const { id } = await context.params;
   const shortLinkId = id?.trim();

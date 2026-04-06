@@ -1,17 +1,11 @@
 import { NextResponse } from "next/server";
 import { createShortLink, listShortLinks } from "@/lib/short-link-service";
-import { getMarketingSessionUser, unauthorized } from "@/lib/security";
 import type { CreateShortLinkInput } from "@/lib/short-link-types";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    return unauthorized();
-  }
 
   try {
     const items = await listShortLinks();
@@ -33,11 +27,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    return unauthorized();
-  }
 
   let body: CreateShortLinkInput;
 
@@ -59,7 +48,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const item = await createShortLink({ data: body });
+    const item = await createShortLink({ data: body, requestId });
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     console.error("[Cenzer ShortLink][API][POST] Failed", {

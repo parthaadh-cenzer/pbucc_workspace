@@ -1,19 +1,12 @@
 import { NextResponse } from "next/server";
 import { resolveRequestOrigin } from "@/lib/cenzer-runtime";
 import { createQrRedirect, listQrRedirects } from "@/lib/qr-code-service";
-import { getMarketingSessionUser, unauthorized } from "@/lib/security";
 import type { CreateQrRedirectInput } from "@/lib/qr-code-types";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    console.warn("[Cenzer QR][API][GET] Unauthorized", { requestId });
-    return unauthorized();
-  }
 
   try {
     const origin = resolveRequestOrigin(request);
@@ -23,7 +16,6 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("[Cenzer QR][API][GET] Failed", {
       requestId,
-      userId: user.id,
       error: error instanceof Error ? error.message : "unknown",
     });
     return NextResponse.json(
@@ -38,12 +30,6 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    console.warn("[Cenzer QR][API][POST] Unauthorized", { requestId });
-    return unauthorized();
-  }
 
   let body: CreateQrRedirectInput;
 
@@ -66,13 +52,12 @@ export async function POST(request: Request) {
 
   try {
     const origin = resolveRequestOrigin(request);
-    const item = await createQrRedirect({ origin, data: body });
+    const item = await createQrRedirect({ origin, data: body, requestId });
 
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     console.error("[Cenzer QR][API][POST] Failed", {
       requestId,
-      userId: user.id,
       error: error instanceof Error ? error.message : "unknown",
     });
     return NextResponse.json(

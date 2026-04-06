@@ -1,14 +1,5 @@
-import { getAnthropicRuntimeConfig } from "@/lib/cenzer-runtime";
+import { requestCenzerText } from "@/lib/cenzer-provider";
 import { buildDeterministicUtmUrl, normalizeHttpUrl } from "@/lib/qr-code-runtime";
-
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-
-type AnthropicResponse = {
-  content?: Array<{
-    type: string;
-    text?: string;
-  }>;
-};
 
 function extractJsonCandidate(raw: string) {
   const start = raw.indexOf("{");
@@ -51,52 +42,22 @@ function buildUtmPrompt(input: { destinationUrl: string; campaign: string | null
 export async function generateUtmUrlWithClaude(input: {
   destinationUrl: string;
   campaign: string | null;
+  requestId?: string;
 }) {
   const fallback = buildDeterministicUtmUrl(input.destinationUrl, input.campaign);
 
-  let runtimeConfig;
   try {
-    runtimeConfig = getAnthropicRuntimeConfig();
-  } catch {
-    return fallback;
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
-
-  try {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": runtimeConfig.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: runtimeConfig.model,
-        max_tokens: 350,
-        temperature: 0,
-        messages: [
-          {
-            role: "user",
-            content: buildUtmPrompt(input),
-          },
-        ],
-      }),
-      signal: controller.signal,
+    const result = await requestCenzerText({
+      feature: "qr-code-maker",
+      requestId: input.requestId,
+      mode: "utm",
+      prompt: buildUtmPrompt(input),
+      maxTokens: 350,
+      temperature: 0,
+      timeoutMs: 20_000,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.warn("[Cenzer QR][UTM] Claude request failed", {
-        status: response.status,
-        detail: text.slice(0, 220),
-      });
-      return fallback;
-    }
-
-    const payload = (await response.json()) as AnthropicResponse;
-    const modelText = payload.content?.find((item) => item.type === "text")?.text?.trim();
+    const modelText = result.text;
 
     if (!modelText) {
       console.warn("[Cenzer QR][UTM] Claude response missing text content.");
@@ -119,16 +80,19 @@ export async function generateUtmUrlWithClaude(input: {
 
     return normalizeHttpUrl(candidateUrl, "UTM URL");
   } catch (error) {
-    if (controller.signal.aborted) {
-      console.warn("[Cenzer QR][UTM] Claude request timed out; using fallback UTM.");
+    const message = error instanceof Error ? error.message : "unknown";
+
+    if (message.includes("[cenzer-provider-timeout]")) {
+      console.warn("[Cenzer QR][UTM] Claude request timed out; using fallback UTM.", {
+        requestId: input.requestId ?? null,
+      });
       return fallback;
     }
 
     console.warn("[Cenzer QR][UTM] Claude generation failed; using fallback UTM.", {
-      error: error instanceof Error ? error.message : "unknown",
+      requestId: input.requestId ?? null,
+      error: message,
     });
     return fallback;
-  } finally {
-    clearTimeout(timeout);
   }
 }

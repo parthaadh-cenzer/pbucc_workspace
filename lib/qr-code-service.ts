@@ -103,6 +103,7 @@ export async function listQrRedirects(input: { origin: string }) {
 export async function createQrRedirect(input: {
   origin: string;
   data: CreateQrRedirectInput;
+  requestId?: string;
 }) {
   assertQrDelegateReady();
   const destinationUrl = normalizeHttpUrl(input.data.destinationUrl, "Destination URL");
@@ -111,6 +112,7 @@ export async function createQrRedirect(input: {
   const utmUrl = await generateUtmUrlWithClaude({
     destinationUrl,
     campaign,
+    requestId: input.requestId,
   });
 
   const slug = await createUniqueSlug();
@@ -133,6 +135,7 @@ export async function updateQrRedirect(input: {
   id: string;
   origin: string;
   data: UpdateQrRedirectInput;
+  requestId?: string;
 }) {
   assertQrDelegateReady();
   const existing = await prisma.qrRedirect.findUnique({
@@ -178,6 +181,7 @@ export async function updateQrRedirect(input: {
     const regeneratedUtm = await generateUtmUrlWithClaude({
       destinationUrl: utmBase,
       campaign: nextCampaign,
+      requestId: input.requestId,
     });
 
     updateData.utmUrl = regeneratedUtm;

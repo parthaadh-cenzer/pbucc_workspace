@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveRequestOrigin } from "@/lib/cenzer-runtime";
 import { renderQrDownload } from "@/lib/qr-code-service";
-import { getMarketingSessionUser, unauthorized } from "@/lib/security";
 
 export const runtime = "nodejs";
 
@@ -11,12 +10,6 @@ type RouteContext = {
 
 export async function GET(request: Request, context: RouteContext) {
   const requestId = crypto.randomUUID().slice(0, 8);
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    console.warn("[Cenzer QR][API][DOWNLOAD] Unauthorized", { requestId });
-    return unauthorized();
-  }
 
   const { id } = await context.params;
   const redirectId = id?.trim();
@@ -49,7 +42,6 @@ export async function GET(request: Request, context: RouteContext) {
   } catch (error) {
     console.error("[Cenzer QR][API][DOWNLOAD] Failed", {
       requestId,
-      userId: user.id,
       redirectId,
       color,
       error: error instanceof Error ? error.message : "unknown",

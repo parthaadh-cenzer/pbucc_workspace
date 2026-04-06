@@ -118,7 +118,7 @@ export async function listShortLinks() {
   );
 }
 
-export async function createShortLink(input: { data: CreateShortLinkInput }) {
+export async function createShortLink(input: { data: CreateShortLinkInput; requestId?: string }) {
   assertShortLinkDelegateReady();
 
   const destination = normalizeDestinationUrl(input.data.destinationUrl);
@@ -137,6 +137,7 @@ export async function createShortLink(input: { data: CreateShortLinkInput }) {
       destinationUrl: destination,
       campaign,
       domain,
+      requestId: input.requestId,
     });
   }
 
