@@ -1,15 +1,9 @@
-import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import { DemoEntryForm } from "@/components/auth/demo-entry-form";
 
-export default async function Home() {
-  if (isDemoModeEnabled()) {
-    const selection = await getDemoWorkspaceSelectionFromCookies();
-    redirect(selection ? "/marketing/dashboard" : "/auth");
-  }
-
-  const session = await getServerSession(authOptions);
-
-  redirect(session?.user ? "/marketing/dashboard" : "/auth");
+export default function Home() {
+  return (
+    <main className="flex min-h-screen items-center justify-center px-6 py-10">
+      <DemoEntryForm />
+    </main>
+  );
 }

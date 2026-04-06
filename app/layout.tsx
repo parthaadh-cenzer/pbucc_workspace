@@ -10,7 +10,6 @@ import { ThemeProvider } from "@/components/theme/theme-provider";
 import {
   getDemoTeamIdFromCookies,
   getDemoUserIdFromCookies,
-  isDemoModeEnabled,
 } from "@/lib/demo-mode";
 import "./globals.css";
 
@@ -29,9 +28,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: ReactNode;
 }>) {
-  const demoMode = isDemoModeEnabled();
-  const initialDemoTeamId = demoMode ? await getDemoTeamIdFromCookies() : null;
-  const initialDemoUserId = demoMode ? await getDemoUserIdFromCookies() : null;
+  const demoMode = true;
+  const initialDemoTeamId = await getDemoTeamIdFromCookies();
+  const initialDemoUserId = await getDemoUserIdFromCookies();
 
   return (
     <html lang="en" className={`${plusJakartaSans.variable} h-full antialiased`}>

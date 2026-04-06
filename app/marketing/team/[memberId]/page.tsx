@@ -1,9 +1,10 @@
-import { notFound, redirect } from "next/navigation";
-import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
-import { findWorkspaceUserForTeam } from "@/lib/mock-users";
-import { getMarketingSessionUser, toSafeInt } from "@/lib/security";
-import { getWorkspaceMemberById } from "@/lib/workspace-members";
-import { listWorkspaceTasksForMember } from "@/lib/workspace-tasks";
+import { notFound } from "next/navigation";
+import { getDemoWorkspaceSelectionFromCookies } from "@/lib/demo-mode";
+import {
+  findWorkspaceUserForTeam,
+  listWorkspaceUsersForTeam,
+  workspaceTeams,
+} from "@/lib/mock-users";
 import { MemberProfileWorkspace } from "@/components/team/member-profile-workspace";
 
 type PageProps = {
@@ -11,82 +12,38 @@ type PageProps = {
 };
 
 export default async function TeamMemberProfilePage({ params }: PageProps) {
-  const demoMode = isDemoModeEnabled();
+  const selection = await getDemoWorkspaceSelectionFromCookies();
+  const fallbackTeam = workspaceTeams[0] ?? null;
+  const fallbackUser = fallbackTeam ? listWorkspaceUsersForTeam(fallbackTeam.id)[0] ?? null : null;
+  const activeTeam = selection?.team ?? fallbackTeam;
+  const activeUser = selection?.user ?? fallbackUser;
 
-  if (demoMode) {
-    const selection = await getDemoWorkspaceSelectionFromCookies();
-
-    if (!selection) {
-      redirect("/auth");
-    }
-
-    const routeParams = await params;
-    const selectedMember = findWorkspaceUserForTeam({
-      teamId: selection.team.id,
-      userId: routeParams.memberId,
-    });
-
-    if (!selectedMember) {
-      notFound();
-    }
-
-    return (
-      <MemberProfileWorkspace
-        demoMode
-        currentUserName={selection.user.name}
-        initialProfile={{
-          member: {
-            id: selectedMember.id,
-            name: selectedMember.name,
-            role: selectedMember.role,
-            teamName: selection.team.name,
-          },
-          tasks: [],
-        }}
-      />
-    );
-  }
-
-  const user = await getMarketingSessionUser();
-
-  if (!user) {
-    redirect("/auth");
-  }
-
-  const routeParams = await params;
-  const memberId = toSafeInt(routeParams.memberId);
-
-  if (!memberId) {
+  if (!activeTeam || !activeUser) {
     notFound();
   }
 
-  const [member, tasks] = await Promise.all([
-    getWorkspaceMemberById({
-      memberId,
-      teamId: user.teamId,
-    }),
-    listWorkspaceTasksForMember({
-      teamId: user.teamId,
-      memberId,
-    }),
-  ]);
+  const routeParams = await params;
+  const selectedMember = findWorkspaceUserForTeam({
+    teamId: activeTeam.id,
+    userId: routeParams.memberId,
+  });
 
-  if (!member) {
+  if (!selectedMember) {
     notFound();
   }
 
   return (
     <MemberProfileWorkspace
-      currentUserName={user.username}
-      demoMode={false}
+      demoMode
+      currentUserName={activeUser.name}
       initialProfile={{
         member: {
-          id: member.id,
-          name: member.username,
-          role: member.role,
-          teamName: member.teamName,
+          id: selectedMember.id,
+          name: selectedMember.name,
+          role: selectedMember.role,
+          teamName: activeTeam.name,
         },
-        tasks,
+        tasks: [],
       }}
     />
   );

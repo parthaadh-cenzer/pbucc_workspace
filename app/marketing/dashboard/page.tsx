@@ -6,16 +6,13 @@ import {
   Megaphone,
   type LucideIcon,
 } from "lucide-react";
-import { redirect } from "next/navigation";
 import { OngoingCampaignsSection } from "@/components/campaigns/ongoing-campaigns-section";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { RecentActivityList } from "@/components/dashboard/recent-activity-list";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { TeamMembersList } from "@/components/dashboard/team-members-list";
-import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
-import { listWorkspaceUsersForTeam } from "@/lib/mock-users";
-import { getMarketingSessionUser } from "@/lib/security";
-import { listWorkspaceMembers } from "@/lib/workspace-members";
+import { getDemoWorkspaceSelectionFromCookies } from "@/lib/demo-mode";
+import { listWorkspaceUsersForTeam, workspaceTeams } from "@/lib/mock-users";
 import {
   dashboardStats,
   quickActions,
@@ -32,42 +29,15 @@ const iconByStatId: Record<DashboardStat["id"], LucideIcon> = {
 };
 
 export default async function MarketingDashboardPage() {
-  const demoMode = isDemoModeEnabled();
-  let teamMembers: Array<{ id: string | number; initials: string; name: string; role: string }> = [];
-
-  if (demoMode) {
-    const selection = await getDemoWorkspaceSelectionFromCookies();
-
-    if (!selection) {
-      redirect("/auth");
-    }
-
-    teamMembers = listWorkspaceUsersForTeam(selection.team.id).map((member) => ({
-      id: member.id,
-      initials: member.initials,
-      name: member.name,
-      role: member.role,
-    }));
-  } else {
-    const user = await getMarketingSessionUser();
-
-    if (!user) {
-      redirect("/auth");
-    }
-
-    const workspaceMembers = await listWorkspaceMembers(user.teamId);
-    teamMembers = workspaceMembers.map((member) => ({
-      id: member.id,
-      initials: member.username
-        .split(" ")
-        .map((part) => part[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase() || "WU",
-      name: member.username,
-      role: member.role,
-    }));
-  }
+  const selection = await getDemoWorkspaceSelectionFromCookies();
+  const fallbackTeamId = workspaceTeams[0]?.id ?? "marketing";
+  const activeTeamId = selection?.team.id ?? fallbackTeamId;
+  const teamMembers = listWorkspaceUsersForTeam(activeTeamId).map((member) => ({
+    id: member.id,
+    initials: member.initials,
+    name: member.name,
+    role: member.role,
+  }));
 
   return (
     <div className="space-y-6">

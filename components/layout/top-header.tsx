@@ -2,7 +2,6 @@
 
 import { LogOut } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { signOut } from "next-auth/react";
 import { useDemoUser } from "@/components/demo/demo-user-provider";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { Badge } from "@/components/ui/badge";
@@ -47,14 +46,9 @@ export function TopHeader({
     .toUpperCase();
 
   const handleSessionAction = () => {
-    if (demoMode) {
-      clearSelection();
-      router.push("/auth");
-      router.refresh();
-      return;
-    }
-
-    signOut({ callbackUrl: "/auth" });
+    clearSelection();
+    router.push("/");
+    router.refresh();
   };
 
   return (
@@ -86,7 +80,7 @@ export function TopHeader({
             className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-semibold transition hover:bg-[var(--color-surface-muted)]"
           >
             <LogOut size={14} />
-            {demoMode ? "Change User / Team" : "Logout"}
+            {demoMode ? "Change User / Team" : "Back to Selector"}
           </button>
         </div>
       </div>

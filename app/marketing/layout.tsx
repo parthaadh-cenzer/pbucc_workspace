@@ -1,49 +1,21 @@
 import type { ReactNode } from "react";
-import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopHeader } from "@/components/layout/top-header";
-import { authOptions } from "@/lib/auth";
 import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import { listWorkspaceUsersForTeam, workspaceTeams } from "@/lib/mock-users";
 import { marketingSidebarItems } from "@/lib/mock-data";
-import { MARKETING_TEAM_NAME } from "@/lib/security";
 
 export default async function MarketingLayout({
   children,
 }: {
   children: ReactNode;
 }) {
+  const selection = await getDemoWorkspaceSelectionFromCookies();
+  const fallbackTeam = workspaceTeams[0] ?? null;
+  const fallbackUser = fallbackTeam ? listWorkspaceUsersForTeam(fallbackTeam.id)[0] ?? null : null;
+  const teamName = selection?.team.name ?? fallbackTeam?.name ?? "Workspace";
+  const userName = selection?.user.name ?? fallbackUser?.name ?? "Workspace User";
   const demoMode = isDemoModeEnabled();
-  let teamName = MARKETING_TEAM_NAME;
-  let userName = "Workspace User";
-
-  if (demoMode) {
-    const selection = await getDemoWorkspaceSelectionFromCookies();
-
-    if (!selection) {
-      redirect("/auth");
-    }
-
-    teamName = selection.team.name;
-    userName = selection.user.name;
-  } else {
-    const session = await getServerSession(authOptions);
-
-    if (!session?.user) {
-      redirect("/auth");
-    }
-
-    if (
-      !session.user.teamId ||
-      !session.user.teamName ||
-      session.user.teamName.toLowerCase() !== MARKETING_TEAM_NAME.toLowerCase()
-    ) {
-      redirect("/auth");
-    }
-
-    teamName = session.user.teamName ?? MARKETING_TEAM_NAME;
-    userName = session.user.username || "Workspace User";
-  }
 
   return (
     <div className="min-h-screen">

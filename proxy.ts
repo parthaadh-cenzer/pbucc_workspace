@@ -1,23 +1,7 @@
-import { type NextFetchEvent, type NextRequest, NextResponse } from "next/server";
-import { withAuth } from "next-auth/middleware";
+import { NextResponse } from "next/server";
 
-const authMiddleware = withAuth({
-  pages: {
-    signIn: "/auth",
-  },
-});
-
-const runAuthMiddleware = authMiddleware as unknown as (
-  request: NextRequest,
-  event: NextFetchEvent,
-) => ReturnType<typeof NextResponse.next>;
-
-export default function proxy(request: NextRequest, event: NextFetchEvent) {
-  if (process.env.DEMO_MODE === "true") {
-    return NextResponse.next();
-  }
-
-  return runAuthMiddleware(request, event);
+export default function proxy() {
+  return NextResponse.next();
 }
 
 export const config = {
