@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int          @id @default(autoincrement())
+  username     String       @unique
+  passwordHash String       @map("password_hash")
+  teamId       Int?         @map("team_id")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  team         Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  userMemory   UserMemory[]
+  chatThreads  ChatThread[]
+  assignedTasks WorkspaceTask[] @relation("WorkspaceTaskAssignee")
+  createdTasks WorkspaceTask[]  @relation("WorkspaceTaskCreator")
+
+  @@map("users")
+}
+
+model QrRedirect {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  originalUrl String
+  utmUrl      String
+  destination String
+  campaign    String?
+  color       String
+  scans       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ShortLink {
+  id          String   @id @default(cuid())
+  domain      String
+  slug        String
+  shortUrl    String
+  destination String
+  campaign    String?
+  clicks      Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([domain, slug])
+}
+
+model Team {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  users     User[]
+  tasks     WorkspaceTask[]
+
+  @@map("teams")
+}
+
+model WorkspaceTask {
+  id             String              @id @default(cuid())
+  title          String
+  description    String?
+  status         WorkspaceTaskStatus
+  dueDate        DateTime            @map("due_date")
+  freshdeskTicket String?            @map("freshdesk_ticket")
+  assigneeId     Int                 @map("assignee_id")
+  createdById    Int                 @map("created_by_id")
+  teamId         Int                 @map("team_id")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  assignee User @relation("WorkspaceTaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  createdBy User @relation("WorkspaceTaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, assigneeId, status])
+  @@map("workspace_tasks")
+}
+
+enum WorkspaceTaskStatus {
+  Ongoing
+  Upcoming
+}
+
+model UserMemory {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  key       String
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@map("user_memory")
+}
+
+model ChatThread {
+  id        Int           @id @default(autoincrement())
+  userId    Int           @map("user_id")
+  title     String
+  createdAt DateTime      @default(now()) @map("created_at")
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+
+  @@map("chat_threads")
+}
+
+model ChatMessage {
+  id        Int        @id @default(autoincrement())
+  threadId  Int        @map("thread_id")
+  role      String
+  content   String
+  createdAt DateTime   @default(now()) @map("created_at")
+  thread    ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@map("chat_messages")
+}
