@@ -4,7 +4,7 @@ import { getServerSession } from "next-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopHeader } from "@/components/layout/top-header";
 import { authOptions } from "@/lib/auth";
-import { getDemoWorkspaceUserFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
 import { marketingSidebarItems } from "@/lib/mock-data";
 import { MARKETING_TEAM_NAME } from "@/lib/security";
 
@@ -18,13 +18,14 @@ export default async function MarketingLayout({
   let userName = "Workspace User";
 
   if (demoMode) {
-    const demoUser = await getDemoWorkspaceUserFromCookies();
+    const selection = await getDemoWorkspaceSelectionFromCookies();
 
-    if (!demoUser) {
+    if (!selection) {
       redirect("/auth");
     }
 
-    userName = demoUser.name;
+    teamName = selection.team.name;
+    userName = selection.user.name;
   } else {
     const session = await getServerSession(authOptions);
 

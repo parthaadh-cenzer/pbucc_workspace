@@ -31,7 +31,7 @@ export function TopHeader({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { clearCurrentUser } = useDemoUser();
+  const { clearSelection } = useDemoUser();
   const pageTitle = pathname.startsWith("/marketing/ongoing-campaigns/")
     ? pathname.endsWith("/create")
       ? "Create Campaign"
@@ -46,9 +46,9 @@ export function TopHeader({
     .slice(0, 2)
     .toUpperCase();
 
-  const handleLogout = () => {
+  const handleSessionAction = () => {
     if (demoMode) {
-      clearCurrentUser();
+      clearSelection();
       router.push("/auth");
       router.refresh();
       return;
@@ -82,11 +82,11 @@ export function TopHeader({
 
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={handleSessionAction}
             className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-semibold transition hover:bg-[var(--color-surface-muted)]"
           >
             <LogOut size={14} />
-            Logout
+            {demoMode ? "Change User / Team" : "Logout"}
           </button>
         </div>
       </div>

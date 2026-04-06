@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
-import { getDemoWorkspaceUserFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
-import { findWorkspaceUserById } from "@/lib/mock-users";
+import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import { findWorkspaceUserForTeam } from "@/lib/mock-users";
 import { getMarketingSessionUser, toSafeInt } from "@/lib/security";
 import { getWorkspaceMemberById } from "@/lib/workspace-members";
 import { listWorkspaceTasksForMember } from "@/lib/workspace-tasks";
@@ -14,14 +14,17 @@ export default async function TeamMemberProfilePage({ params }: PageProps) {
   const demoMode = isDemoModeEnabled();
 
   if (demoMode) {
-    const demoUser = await getDemoWorkspaceUserFromCookies();
+    const selection = await getDemoWorkspaceSelectionFromCookies();
 
-    if (!demoUser) {
+    if (!selection) {
       redirect("/auth");
     }
 
     const routeParams = await params;
-    const selectedMember = findWorkspaceUserById(routeParams.memberId);
+    const selectedMember = findWorkspaceUserForTeam({
+      teamId: selection.team.id,
+      userId: routeParams.memberId,
+    });
 
     if (!selectedMember) {
       notFound();
@@ -30,13 +33,13 @@ export default async function TeamMemberProfilePage({ params }: PageProps) {
     return (
       <MemberProfileWorkspace
         demoMode
-        currentUserName={demoUser.name}
+        currentUserName={selection.user.name}
         initialProfile={{
           member: {
             id: selectedMember.id,
             name: selectedMember.name,
             role: selectedMember.role,
-            teamName: "Marketing",
+            teamName: selection.team.name,
           },
           tasks: [],
         }}

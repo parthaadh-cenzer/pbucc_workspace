@@ -79,7 +79,7 @@ export const socialReviewSeedPosts: SocialReviewPost[] = [
     caption:
       "Practical budgeting starts with small weekly habits. Download our free checklist and join the next workshop.",
     campaignSlugs: ["managing-money-for-today", "planning-for-tomorrow"],
-    reviewerIds: ["partha", "test-admin"],
+    reviewerIds: ["partha", "steve"],
     platform: "Instagram",
     date: "2026-04-11",
     status: "Pending Review",
@@ -98,7 +98,7 @@ export const socialReviewSeedPosts: SocialReviewPost[] = [
     caption:
       "Your future plan can start this week. Book a 1:1 financial planning session and get your roadmap.",
     campaignSlugs: ["planning-for-tomorrow"],
-    reviewerIds: ["test-admin", "partha"],
+    reviewerIds: ["emma", "partha"],
     platform: "LinkedIn",
     date: "2026-04-14",
     status: "Changes Requested",
@@ -106,7 +106,7 @@ export const socialReviewSeedPosts: SocialReviewPost[] = [
       {
         id: 1,
         action: "Uploaded for review",
-        by: "Test Admin",
+        by: "Emma",
         at: "2026-04-08 11:30",
       },
       {
@@ -124,7 +124,7 @@ export const socialReviewSeedPosts: SocialReviewPost[] = [
     caption:
       "Faith and finance can work together. Watch the webinar replay and share with your group.",
     campaignSlugs: ["faith-finance"],
-    reviewerIds: ["partha"],
+    reviewerIds: ["judith"],
     platform: "Facebook",
     date: "2026-05-03",
     status: "Draft",
@@ -143,7 +143,7 @@ export const socialReviewSeedPosts: SocialReviewPost[] = [
     caption:
       "Meet people who found purpose through serving. Tap to explore open volunteer opportunities.",
     campaignSlugs: ["answering-your-call", "faith-finance"],
-    reviewerIds: ["test-admin", "partha"],
+    reviewerIds: ["caroline", "partha"],
     platform: "Instagram",
     date: "2026-04-18",
     status: "Approved",
@@ -151,7 +151,7 @@ export const socialReviewSeedPosts: SocialReviewPost[] = [
       {
         id: 1,
         action: "Uploaded for review",
-        by: "Test Admin",
+        by: "Caroline",
         at: "2026-04-06 13:21",
       },
       {

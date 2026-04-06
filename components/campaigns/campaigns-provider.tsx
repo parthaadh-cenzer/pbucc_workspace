@@ -9,6 +9,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useDemoUser } from "@/components/demo/demo-user-provider";
 import {
   createCampaignRecord,
   hasDuplicateCampaignName,
@@ -25,18 +26,27 @@ type CampaignsContextValue = {
   hydrated: boolean;
 };
 
-const STORAGE_KEY = "marketing-created-campaigns";
+const STORAGE_KEY_PREFIX = "marketing-created-campaigns";
 const seedCampaignRecords = normalizeSeedCampaigns(ongoingCampaigns);
 
 const CampaignsContext = createContext<CampaignsContextValue | undefined>(undefined);
 
 export function CampaignsProvider({ children }: { children: ReactNode }) {
+  const { demoMode, currentUser } = useDemoUser();
+  const activeUserKey = demoMode ? currentUser?.id ?? "unselected" : "auth";
+  const storageKey = `${STORAGE_KEY_PREFIX}:${activeUserKey}`;
   const [createdCampaigns, setCreatedCampaigns] = useState<CampaignRecord[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
+    if (activeUserKey === "unselected") {
+      setCreatedCampaigns([]);
+      setHydrated(false);
+      return;
+    }
+
     try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
+      const saved = window.localStorage.getItem(storageKey);
 
       if (saved) {
         const parsed = JSON.parse(saved) as CampaignRecord[];
@@ -47,15 +57,15 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
     } finally {
       setHydrated(true);
     }
-  }, []);
+  }, [activeUserKey, storageKey]);
 
   useEffect(() => {
-    if (!hydrated) {
+    if (!hydrated || activeUserKey === "unselected") {
       return;
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(createdCampaigns));
-  }, [createdCampaigns, hydrated]);
+    window.localStorage.setItem(storageKey, JSON.stringify(createdCampaigns));
+  }, [activeUserKey, createdCampaigns, hydrated, storageKey]);
 
   const campaigns = useMemo(
     () => [...createdCampaigns, ...seedCampaignRecords],

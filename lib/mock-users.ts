@@ -1,28 +1,65 @@
+export type WorkspaceTeam = {
+  id: string;
+  name: string;
+  description: string;
+};
+
 export type WorkspaceUser = {
   id: string;
+  teamId: string;
   name: string;
   role: string;
   initials: string;
 };
 
-export const workspaceUsers: WorkspaceUser[] = [
+export const workspaceTeams: WorkspaceTeam[] = [
   {
-    id: "partha",
-    name: "Partha",
-    role: "Workspace Admin",
-    initials: "PA",
-  },
-  {
-    id: "test-admin",
-    name: "Test Admin",
-    role: "Workspace Reviewer",
-    initials: "TA",
+    id: "marketing",
+    name: "Marketing",
+    description: "Campaign, review, and content operations",
   },
 ];
 
-export const workspaceUsersById = new Map(
-  workspaceUsers.map((user) => [user.id, user]),
-);
+export const workspaceUsers: WorkspaceUser[] = [
+  {
+    id: "partha",
+    teamId: "marketing",
+    name: "Partha",
+    role: "Workspace Lead",
+    initials: "PA",
+  },
+  {
+    id: "steve",
+    teamId: "marketing",
+    name: "Steve",
+    role: "Campaign Manager",
+    initials: "ST",
+  },
+  {
+    id: "emma",
+    teamId: "marketing",
+    name: "Emma",
+    role: "Social Reviewer",
+    initials: "EM",
+  },
+  {
+    id: "judith",
+    teamId: "marketing",
+    name: "Judith",
+    role: "SEO Specialist",
+    initials: "JU",
+  },
+  {
+    id: "caroline",
+    teamId: "marketing",
+    name: "Caroline",
+    role: "Content Coordinator",
+    initials: "CA",
+  },
+];
+
+export const workspaceUsersById = new Map(workspaceUsers.map((user) => [user.id, user]));
+export const workspaceTeamsById = new Map(workspaceTeams.map((team) => [team.id, team]));
 
 function normalizeWorkspaceUserValue(value: string) {
   return value
@@ -48,15 +85,35 @@ export function findWorkspaceUserById(userId: string) {
   return workspaceUsersById.get(userId) ?? null;
 }
 
-export function findWorkspaceUserByUsername(input: string) {
+export function findWorkspaceTeamById(teamId: string) {
+  return workspaceTeamsById.get(teamId) ?? null;
+}
+
+export function listWorkspaceUsersForTeam(teamId: string) {
+  return workspaceUsers.filter((user) => user.teamId === teamId);
+}
+
+export function findWorkspaceUserForTeam(input: { teamId: string; userId: string }) {
+  const user = findWorkspaceUserById(input.userId);
+
+  if (!user || user.teamId !== input.teamId) {
+    return null;
+  }
+
+  return user;
+}
+
+export function findWorkspaceUserByUsername(input: string, teamId?: string) {
   const candidates = buildLookupCandidates(input);
 
   if (candidates.length < 1) {
     return null;
   }
 
+  const users = teamId ? listWorkspaceUsersForTeam(teamId) : workspaceUsers;
+
   return (
-    workspaceUsers.find((user) => {
+    users.find((user) => {
       const userCandidates = buildLookupCandidates(`${user.id} ${user.name}`);
       return candidates.some((candidate) => userCandidates.includes(candidate));
     }) ?? null

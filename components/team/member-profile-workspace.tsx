@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Plus } from "lucide-react";
+import { useDemoUser } from "@/components/demo/demo-user-provider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type {
@@ -99,10 +100,49 @@ export function MemberProfileWorkspace({
   currentUserName: string;
   demoMode?: boolean;
 }) {
+  const { currentUser } = useDemoUser();
   const [tasks, setTasks] = useState<WorkspaceTaskRecord[]>(initialProfile.tasks);
   const [form, setForm] = useState<CreateTaskFormState>(initialFormState);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  const demoTaskStorageKey =
+    demoMode && currentUser
+      ? `workspace-demo-tasks:${currentUser.id}:${initialProfile.member.id}`
+      : null;
+
+  useEffect(() => {
+    if (!demoMode) {
+      setTasks(initialProfile.tasks);
+      return;
+    }
+
+    if (!demoTaskStorageKey) {
+      setTasks([]);
+      return;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(demoTaskStorageKey);
+
+      if (saved) {
+        const parsed = JSON.parse(saved) as WorkspaceTaskRecord[];
+        setTasks(parsed);
+      } else {
+        setTasks(initialProfile.tasks);
+      }
+    } catch {
+      setTasks(initialProfile.tasks);
+    }
+  }, [demoMode, demoTaskStorageKey, initialProfile.tasks]);
+
+  useEffect(() => {
+    if (!demoMode || !demoTaskStorageKey) {
+      return;
+    }
+
+    window.localStorage.setItem(demoTaskStorageKey, JSON.stringify(tasks));
+  }, [demoMode, demoTaskStorageKey, tasks]);
 
   const ongoingTasks = useMemo(
     () => tasks.filter((task) => task.status === "Ongoing"),

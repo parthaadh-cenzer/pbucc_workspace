@@ -4,10 +4,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { useDemoUser } from "@/components/demo/demo-user-provider";
+import { findWorkspaceUserByUsername } from "@/lib/mock-users";
 
 export type NotificationSource = "Review" | "Social Review" | "Campaign" | "System";
 
@@ -40,6 +43,7 @@ type NotificationsContextValue = {
 };
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
+const STORAGE_KEY_PREFIX = "workspace-notifications";
 
 function createNotificationId() {
   return `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -67,9 +71,55 @@ const seedNotifications: WorkspaceNotification[] = [
 ];
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
-  const [notifications, setNotifications] = useState<WorkspaceNotification[]>(seedNotifications);
+  const { demoMode, currentUser } = useDemoUser();
+  const activeUserKey = demoMode ? currentUser?.id ?? "unselected" : "auth";
+  const storageKey = `${STORAGE_KEY_PREFIX}:${activeUserKey}`;
+  const [notifications, setNotifications] = useState<WorkspaceNotification[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (activeUserKey === "unselected") {
+      setNotifications([]);
+      setHydrated(false);
+      return;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+
+      if (saved) {
+        const parsed = JSON.parse(saved) as WorkspaceNotification[];
+        setNotifications(parsed);
+      } else {
+        setNotifications(seedNotifications);
+      }
+    } catch {
+      setNotifications(seedNotifications);
+    } finally {
+      setHydrated(true);
+    }
+  }, [activeUserKey, storageKey]);
+
+  useEffect(() => {
+    if (!hydrated || activeUserKey === "unselected") {
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(notifications));
+  }, [activeUserKey, hydrated, notifications, storageKey]);
 
   const addNotification = useCallback((input: CreateNotificationInput) => {
+    if (activeUserKey === "unselected") {
+      throw new Error("Cannot add notifications without an active workspace user.");
+    }
+
+    const recipientUser =
+      demoMode && input.recipient
+        ? findWorkspaceUserByUsername(input.recipient, currentUser?.teamId)
+        : null;
+    const targetUserKey = recipientUser?.id ?? activeUserKey;
+    const targetStorageKey = `${STORAGE_KEY_PREFIX}:${targetUserKey}`;
+
     const created: WorkspaceNotification = {
       id: createNotificationId(),
       title: input.title,
@@ -81,9 +131,22 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       unread: true,
     };
 
+    if (demoMode) {
+      const existing = window.localStorage.getItem(targetStorageKey);
+      const parsedExisting = existing ? (JSON.parse(existing) as WorkspaceNotification[]) : [];
+      const nextForTarget = [created, ...parsedExisting];
+      window.localStorage.setItem(targetStorageKey, JSON.stringify(nextForTarget));
+
+      if (targetUserKey === activeUserKey) {
+        setNotifications(nextForTarget);
+      }
+
+      return created;
+    }
+
     setNotifications((previous) => [created, ...previous]);
     return created;
-  }, []);
+  }, [activeUserKey, currentUser?.teamId, demoMode]);
 
   const markAsRead = useCallback((id: string) => {
     setNotifications((previous) =>

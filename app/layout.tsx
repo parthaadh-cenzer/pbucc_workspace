@@ -7,7 +7,11 @@ import { NotificationsProvider } from "@/components/notifications/notifications-
 import { ReviewProvider } from "@/components/review/review-provider";
 import { SocialPostsProvider } from "@/components/social-review/social-posts-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
-import { getDemoUserIdFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import {
+  getDemoTeamIdFromCookies,
+  getDemoUserIdFromCookies,
+  isDemoModeEnabled,
+} from "@/lib/demo-mode";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -26,12 +30,17 @@ export default async function RootLayout({
   children: ReactNode;
 }>) {
   const demoMode = isDemoModeEnabled();
+  const initialDemoTeamId = demoMode ? await getDemoTeamIdFromCookies() : null;
   const initialDemoUserId = demoMode ? await getDemoUserIdFromCookies() : null;
 
   return (
     <html lang="en" className={`${plusJakartaSans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <DemoUserProvider demoMode={demoMode} initialUserId={initialDemoUserId}>
+        <DemoUserProvider
+          demoMode={demoMode}
+          initialTeamId={initialDemoTeamId}
+          initialUserId={initialDemoUserId}
+        >
           <ThemeProvider>
             <NotificationsProvider>
               <CampaignsProvider>

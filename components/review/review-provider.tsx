@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useDemoUser } from "@/components/demo/demo-user-provider";
 import { useNotifications } from "@/components/notifications/notifications-provider";
 import { workspaceReviewMembers } from "@/lib/mock-review";
 import type { CreateReviewItemInput, ReviewItem, ReviewRemarkHistoryItem, ReviewStatus } from "@/lib/review-types";
@@ -35,6 +36,7 @@ type ReviewContextValue = {
 };
 
 const ReviewContext = createContext<ReviewContextValue | null>(null);
+const STORAGE_KEY_PREFIX = "workspace-review-items";
 
 function createItemId() {
   return `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,9 +75,46 @@ function getReviewItemHref(input: { itemId: string; tab?: "review" | "approved" 
 }
 
 export function ReviewProvider({ children }: { children: ReactNode }) {
+  const { demoMode, currentUser } = useDemoUser();
+  const activeUserKey = demoMode ? currentUser?.id ?? "unselected" : "auth";
+  const storageKey = `${STORAGE_KEY_PREFIX}:${activeUserKey}`;
   const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const dueReminderSentRef = useRef<Set<string>>(new Set());
   const { addNotification } = useNotifications();
+
+  useEffect(() => {
+    dueReminderSentRef.current = new Set();
+
+    if (activeUserKey === "unselected") {
+      setReviewItems([]);
+      setHydrated(false);
+      return;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+
+      if (saved) {
+        const parsed = JSON.parse(saved) as ReviewItem[];
+        setReviewItems(parsed);
+      } else {
+        setReviewItems([]);
+      }
+    } catch {
+      setReviewItems([]);
+    } finally {
+      setHydrated(true);
+    }
+  }, [activeUserKey, storageKey]);
+
+  useEffect(() => {
+    if (!hydrated || activeUserKey === "unselected") {
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(reviewItems));
+  }, [activeUserKey, hydrated, reviewItems, storageKey]);
 
   const membersById = useMemo(
     () => new Map(workspaceReviewMembers.map((member) => [member.id, member])),
@@ -89,6 +128,10 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
 
   const createReviewItem = useCallback(
     (input: CreateReviewItemInput) => {
+      if (activeUserKey === "unselected") {
+        throw new Error("Cannot create review item without an active workspace user.");
+      }
+
       const now = new Date().toISOString();
       const id = createItemId();
       const note = input.note?.trim() || null;
@@ -136,7 +179,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
 
       return created;
     },
-    [addNotification, membersById],
+    [activeUserKey, addNotification, membersById],
   );
 
   const setReviewInProgress = useCallback(

@@ -12,8 +12,8 @@ import { QuickActions } from "@/components/dashboard/quick-actions";
 import { RecentActivityList } from "@/components/dashboard/recent-activity-list";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { TeamMembersList } from "@/components/dashboard/team-members-list";
-import { getDemoWorkspaceUserFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
-import { workspaceUsers } from "@/lib/mock-users";
+import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import { listWorkspaceUsersForTeam } from "@/lib/mock-users";
 import { getMarketingSessionUser } from "@/lib/security";
 import { listWorkspaceMembers } from "@/lib/workspace-members";
 import {
@@ -36,13 +36,13 @@ export default async function MarketingDashboardPage() {
   let teamMembers: Array<{ id: string | number; initials: string; name: string; role: string }> = [];
 
   if (demoMode) {
-    const demoUser = await getDemoWorkspaceUserFromCookies();
+    const selection = await getDemoWorkspaceSelectionFromCookies();
 
-    if (!demoUser) {
+    if (!selection) {
       redirect("/auth");
     }
 
-    teamMembers = workspaceUsers.map((member) => ({
+    teamMembers = listWorkspaceUsersForTeam(selection.team.id).map((member) => ({
       id: member.id,
       initials: member.initials,
       name: member.name,

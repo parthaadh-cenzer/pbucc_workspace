@@ -3,13 +3,13 @@ import { getServerSession } from "next-auth";
 import { AuthForm } from "@/components/auth/auth-form";
 import { DemoEntryForm } from "@/components/auth/demo-entry-form";
 import { authOptions } from "@/lib/auth";
-import { getDemoWorkspaceUserFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import { getDemoWorkspaceSelectionFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
 
 export default async function AuthPage() {
   if (isDemoModeEnabled()) {
-    const demoUser = await getDemoWorkspaceUserFromCookies();
+    const selection = await getDemoWorkspaceSelectionFromCookies();
 
-    if (demoUser) {
+    if (selection) {
       redirect("/marketing/dashboard");
     }
 

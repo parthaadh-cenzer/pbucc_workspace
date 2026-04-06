@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useDemoUser } from "@/components/demo/demo-user-provider";
 import {
   createSocialPostFromUpload,
   socialReviewSeedPosts,
@@ -18,14 +19,54 @@ type SocialPostsContextValue = {
 };
 
 const SocialPostsContext = createContext<SocialPostsContextValue | null>(null);
+const STORAGE_KEY_PREFIX = "workspace-social-posts";
 
 export function SocialPostsProvider({ children }: { children: ReactNode }) {
-  const [posts, setPosts] = useState<SocialReviewPost[]>(socialReviewSeedPosts);
+  const { demoMode, currentUser } = useDemoUser();
+  const activeUserKey = demoMode ? currentUser?.id ?? "unselected" : "auth";
+  const storageKey = `${STORAGE_KEY_PREFIX}:${activeUserKey}`;
+  const [posts, setPosts] = useState<SocialReviewPost[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (activeUserKey === "unselected") {
+      setPosts([]);
+      setHydrated(false);
+      return;
+    }
+
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+
+      if (saved) {
+        const parsed = JSON.parse(saved) as SocialReviewPost[];
+        setPosts(parsed);
+      } else {
+        setPosts(socialReviewSeedPosts);
+      }
+    } catch {
+      setPosts(socialReviewSeedPosts);
+    } finally {
+      setHydrated(true);
+    }
+  }, [activeUserKey, storageKey]);
+
+  useEffect(() => {
+    if (!hydrated || activeUserKey === "unselected") {
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(posts));
+  }, [activeUserKey, hydrated, posts, storageKey]);
 
   const value = useMemo<SocialPostsContextValue>(() => {
     return {
       posts,
       addPost: (input) => {
+        if (activeUserKey === "unselected") {
+          throw new Error("Cannot add social posts without an active workspace user.");
+        }
+
         const nextId = posts.length > 0 ? Math.max(...posts.map((post) => post.id)) + 1 : 1;
         const created = createSocialPostFromUpload(input, nextId);
         setPosts((previous) => [created, ...previous]);
@@ -37,7 +78,7 @@ export function SocialPostsProvider({ children }: { children: ReactNode }) {
         );
       },
     };
-  }, [posts]);
+  }, [activeUserKey, posts]);
 
   return <SocialPostsContext.Provider value={value}>{children}</SocialPostsContext.Provider>;
 }
