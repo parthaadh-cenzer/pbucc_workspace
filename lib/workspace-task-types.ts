@@ -19,7 +19,7 @@ export type WorkspaceTaskRecord = {
 
 export type WorkspaceMemberProfilePayload = {
   member: {
-    id: number;
+    id: number | string;
     name: string;
     role: string;
     teamName: string;

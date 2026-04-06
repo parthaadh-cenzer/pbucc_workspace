@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { CampaignsProvider } from "@/components/campaigns/campaigns-provider";
+import { DemoUserProvider } from "@/components/demo/demo-user-provider";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { ReviewProvider } from "@/components/review/review-provider";
 import { SocialPostsProvider } from "@/components/social-review/social-posts-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
+import { getDemoUserIdFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -18,23 +20,28 @@ export const metadata: Metadata = {
   description: "Internal workspace prototype for team operations",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: ReactNode;
 }>) {
+  const demoMode = isDemoModeEnabled();
+  const initialDemoUserId = demoMode ? await getDemoUserIdFromCookies() : null;
+
   return (
     <html lang="en" className={`${plusJakartaSans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <ThemeProvider>
-          <NotificationsProvider>
-            <CampaignsProvider>
-              <SocialPostsProvider>
-                <ReviewProvider>{children}</ReviewProvider>
-              </SocialPostsProvider>
-            </CampaignsProvider>
-          </NotificationsProvider>
-        </ThemeProvider>
+        <DemoUserProvider demoMode={demoMode} initialUserId={initialDemoUserId}>
+          <ThemeProvider>
+            <NotificationsProvider>
+              <CampaignsProvider>
+                <SocialPostsProvider>
+                  <ReviewProvider>{children}</ReviewProvider>
+                </SocialPostsProvider>
+              </CampaignsProvider>
+            </NotificationsProvider>
+          </ThemeProvider>
+        </DemoUserProvider>
       </body>
     </html>
   );

@@ -12,6 +12,8 @@ import { QuickActions } from "@/components/dashboard/quick-actions";
 import { RecentActivityList } from "@/components/dashboard/recent-activity-list";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { TeamMembersList } from "@/components/dashboard/team-members-list";
+import { getDemoWorkspaceUserFromCookies, isDemoModeEnabled } from "@/lib/demo-mode";
+import { workspaceUsers } from "@/lib/mock-users";
 import { getMarketingSessionUser } from "@/lib/security";
 import { listWorkspaceMembers } from "@/lib/workspace-members";
 import {
@@ -30,24 +32,42 @@ const iconByStatId: Record<DashboardStat["id"], LucideIcon> = {
 };
 
 export default async function MarketingDashboardPage() {
-  const user = await getMarketingSessionUser();
+  const demoMode = isDemoModeEnabled();
+  let teamMembers: Array<{ id: string | number; initials: string; name: string; role: string }> = [];
 
-  if (!user) {
-    redirect("/auth");
+  if (demoMode) {
+    const demoUser = await getDemoWorkspaceUserFromCookies();
+
+    if (!demoUser) {
+      redirect("/auth");
+    }
+
+    teamMembers = workspaceUsers.map((member) => ({
+      id: member.id,
+      initials: member.initials,
+      name: member.name,
+      role: member.role,
+    }));
+  } else {
+    const user = await getMarketingSessionUser();
+
+    if (!user) {
+      redirect("/auth");
+    }
+
+    const workspaceMembers = await listWorkspaceMembers(user.teamId);
+    teamMembers = workspaceMembers.map((member) => ({
+      id: member.id,
+      initials: member.username
+        .split(" ")
+        .map((part) => part[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase() || "WU",
+      name: member.username,
+      role: member.role,
+    }));
   }
-
-  const workspaceMembers = await listWorkspaceMembers(user.teamId);
-  const teamMembers = workspaceMembers.map((member) => ({
-    id: member.id,
-    initials: member.username
-      .split(" ")
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "WU",
-    name: member.username,
-    role: member.role,
-  }));
 
   return (
     <div className="space-y-6">

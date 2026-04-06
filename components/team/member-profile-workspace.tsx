@@ -93,9 +93,11 @@ function TaskListSection({
 export function MemberProfileWorkspace({
   initialProfile,
   currentUserName,
+  demoMode = false,
 }: {
   initialProfile: WorkspaceMemberProfilePayload;
   currentUserName: string;
+  demoMode?: boolean;
 }) {
   const [tasks, setTasks] = useState<WorkspaceTaskRecord[]>(initialProfile.tasks);
   const [form, setForm] = useState<CreateTaskFormState>(initialFormState);
@@ -129,6 +131,27 @@ export function MemberProfileWorkspace({
     setIsSubmitting(true);
 
     try {
+      if (demoMode) {
+        const localTask: WorkspaceTaskRecord = {
+          id: `demo-task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          title: form.title.trim(),
+          description: form.description.trim() || null,
+          status: form.status,
+          dueDate: new Date(`${form.dueDate}T00:00:00Z`).toISOString(),
+          freshdeskTicket: form.freshdeskTicket.trim() || null,
+          assigneeId: typeof initialProfile.member.id === "number" ? initialProfile.member.id : 0,
+          assigneeName: initialProfile.member.name,
+          createdById: 0,
+          createdByName: currentUserName,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        setTasks((previous) => [localTask, ...previous]);
+        setForm(initialFormState);
+        return;
+      }
+
       const response = await fetch(`/api/members/${initialProfile.member.id}/tasks`, {
         method: "POST",
         headers: {

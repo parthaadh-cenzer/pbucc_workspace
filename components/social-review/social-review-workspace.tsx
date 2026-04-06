@@ -17,7 +17,6 @@ import {
   type SocialPostStatus,
   type SocialReviewPost,
 } from "@/lib/mock-social-review";
-import { getWorkspaceUserName } from "@/lib/mock-users";
 
 type ReviewStatusFilter = "All" | SocialPostStatus;
 
@@ -37,7 +36,7 @@ function statusBadgeClass(status: SocialPostStatus) {
   return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
 }
 
-export function SocialReviewWorkspace() {
+export function SocialReviewWorkspace({ currentUserName }: { currentUserName: string }) {
   const { campaigns } = useCampaigns();
   const { posts, addPost, updatePost } = useSocialPosts();
   const [selectedPostId, setSelectedPostId] = useState<number>(0);
@@ -83,7 +82,7 @@ export function SocialReviewWorkspace() {
       {
         id: nextId,
         action,
-        by: getWorkspaceUserName("partha"),
+        by: currentUserName,
         at: new Date().toLocaleString("en-US"),
         remarks: remarksText?.trim() || undefined,
       },
@@ -127,7 +126,7 @@ export function SocialReviewWorkspace() {
   };
 
   const handleUpload = (input: NewSocialPostInput) => {
-    const created = addPost(input);
+    const created = addPost({ ...input, createdBy: currentUserName });
     setSelectedPostId(created.id);
     setSelectedMonth(getMonthKey(created.date));
     setStatusFilter("All");

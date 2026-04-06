@@ -28,7 +28,15 @@ export function getRequestIdentifier(request: Request) {
   const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   const realIp = request.headers.get("x-real-ip")?.trim();
   const cfIp = request.headers.get("cf-connecting-ip")?.trim();
-  return forwardedFor || realIp || cfIp || "unknown-client";
+
+  if (forwardedFor || realIp || cfIp) {
+    return forwardedFor || realIp || cfIp || "unknown-client";
+  }
+
+  const host = request.headers.get("host")?.trim() ?? "unknown-host";
+  const userAgent = request.headers.get("user-agent")?.trim().slice(0, 80) ?? "unknown-agent";
+
+  return `unknown-client:${host}:${userAgent}`;
 }
 
 export function badRequest(message: string) {
@@ -44,14 +52,19 @@ export function forbidden() {
 }
 
 export function tooManyRequests(retryAfterSeconds: number) {
+  const safeRetryAfter = Math.max(1, Math.floor(retryAfterSeconds));
+
   return NextResponse.json(
     {
       error: "Too many attempts. Please try again later.",
+      retryAfterSeconds: safeRetryAfter,
     },
     {
       status: 429,
       headers: {
-        "Retry-After": String(retryAfterSeconds),
+        "Retry-After": String(safeRetryAfter),
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Retry-After": String(safeRetryAfter),
       },
     },
   );

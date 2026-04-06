@@ -1,8 +1,9 @@
 "use client";
 
 import { LogOut } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
+import { useDemoUser } from "@/components/demo/demo-user-provider";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -22,11 +23,15 @@ const pageTitleMap: Record<string, string> = {
 export function TopHeader({
   teamName,
   userName,
+  demoMode,
 }: {
   teamName: string;
   userName: string;
+  demoMode: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { clearCurrentUser } = useDemoUser();
   const pageTitle = pathname.startsWith("/marketing/ongoing-campaigns/")
     ? pathname.endsWith("/create")
       ? "Create Campaign"
@@ -40,6 +45,17 @@ export function TopHeader({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  const handleLogout = () => {
+    if (demoMode) {
+      clearCurrentUser();
+      router.push("/auth");
+      router.refresh();
+      return;
+    }
+
+    signOut({ callbackUrl: "/auth" });
+  };
 
   return (
     <header className="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-4 lg:px-8">
@@ -66,7 +82,7 @@ export function TopHeader({
 
           <button
             type="button"
-            onClick={() => signOut({ callbackUrl: "/auth" })}
+            onClick={handleLogout}
             className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-semibold transition hover:bg-[var(--color-surface-muted)]"
           >
             <LogOut size={14} />

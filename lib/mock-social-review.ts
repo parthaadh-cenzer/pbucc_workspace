@@ -42,6 +42,7 @@ export type NewSocialPostInput = {
   campaignSlugs: string[];
   reviewerIds: string[];
   platform: SocialPlatform;
+  createdBy?: string;
 };
 
 export type SocialReviewTeamMember = {
@@ -178,6 +179,8 @@ export function createSocialPostFromUpload(
   input: NewSocialPostInput,
   nextId: number,
 ): SocialReviewPost {
+  const createdBy = input.createdBy?.trim() || "Partha";
+
   return {
     id: nextId,
     imageUrl: input.imageUrl,
@@ -191,7 +194,7 @@ export function createSocialPostFromUpload(
       {
         id: 1,
         action: "Uploaded for review",
-        by: "Partha",
+        by: createdBy,
         at: new Date().toLocaleString("en-US"),
       },
     ],

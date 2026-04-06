@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useDemoUser } from "@/components/demo/demo-user-provider";
 import { useNotifications, type NotificationSource } from "@/components/notifications/notifications-provider";
 
 function sourceClass(source: NotificationSource) {
@@ -45,13 +46,27 @@ function formatRelativeTime(timestamp: string) {
 
 export function NotificationBell() {
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { demoMode, currentUser } = useDemoUser();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
 
+  const visibleNotifications = useMemo(() => {
+    if (!demoMode || !currentUser?.name) {
+      return notifications;
+    }
+
+    return notifications.filter((item) => !item.recipient || item.recipient === currentUser.name);
+  }, [currentUser?.name, demoMode, notifications]);
+
+  const visibleUnreadCount = useMemo(
+    () => visibleNotifications.filter((item) => item.unread).length,
+    [visibleNotifications],
+  );
+
   const sortedNotifications = useMemo(
-    () => [...notifications].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
-    [notifications],
+    () => [...visibleNotifications].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
+    [visibleNotifications],
   );
 
   useEffect(() => {
@@ -86,9 +101,9 @@ export function NotificationBell() {
         aria-label="Open notifications"
       >
         <Bell size={18} />
-        {unreadCount > 0 ? (
+        {visibleUnreadCount > 0 ? (
           <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-bold text-white">
-            {unreadCount > 9 ? "9+" : unreadCount}
+            {visibleUnreadCount > 9 ? "9+" : visibleUnreadCount}
           </span>
         ) : null}
       </button>
